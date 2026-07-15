@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>A Freedom Trail Adventure</title>
+  <meta name="description" content="A shared walk along Boston's historic Freedom Trail.">
+  <meta name="theme-color" content="#f8fafc">
+
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('freedom_theme');
+        var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.body.classList.add((saved || (prefersDark ? 'dark' : 'light')) === 'dark' ? 'dark-mode' : 'light-mode');
+      } catch (e) { document.body.classList.add('light-mode'); }
+    })();
+  </script>
+  <div class="app-container">
+    <header class="app-header">
+      <div class="header-logo">
+        <img src="/logo.png" alt="Freedom Trail Logo" id="app-logo-img">
+        <div class="header-text">
+          <h1>Freedom Trail</h1>
+          <span class="subtitle">Shared Adventure</span>
+        </div>
+      </div>
+    </header>
+
+    <section class="progress-section">
+      <div class="progress-card">
+        <div class="progress-details">
+          <div class="progress-label">
+            <h2 id="share-title">A Freedom Trail Adventure</h2>
+            <p id="share-progress-text">Loading…</p>
+          </div>
+          <div class="progress-percentage" id="share-progress-percent">—</div>
+        </div>
+        <div class="progress-bar-container">
+          <div class="progress-bar-fill" id="share-progress-fill"></div>
+        </div>
+      </div>
+    </section>
+
+    <main class="app-content">
+      <div id="share-loading" class="empty-state">
+        <i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i>
+        <h4>Loading this adventure…</h4>
+      </div>
+
+      <div id="share-error" class="empty-state" style="display:none;">
+        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+        <h4>Adventure not found</h4>
+        <p>This link may be incorrect or the adventure was removed.</p>
+      </div>
+
+      <div class="journal-timeline" id="share-timeline" style="display:none;"></div>
+
+      <div id="share-cta" style="display:none; text-align:center; margin-top:24px;">
+        <a href="/" class="primary-btn" style="text-decoration:none; display:inline-flex; gap:8px; align-items:center;">
+          <i class="fa-solid fa-route" aria-hidden="true"></i> Walk your own Freedom Trail
+        </a>
+      </div>
+    </main>
+  </div>
+
+  <script src="/share-view.js"></script>
+</body>
+</html>

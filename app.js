@@ -496,6 +496,25 @@ function formatDistance(meters) {
 
 // --- UI RENDERING & HANDLERS ---
 
+// Track blob object URLs per view so we can revoke them on re-render and avoid leaks.
+let drawerPhotoUrls = [];
+let journalPhotoUrls = [];
+function revokeUrls(list) {
+  list.forEach(u => URL.revokeObjectURL(u));
+  list.length = 0;
+}
+
+// Escape user-controlled text before injecting into innerHTML (prevents stored XSS).
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Update header progress bar
 function updateProgressUI() {
   const total = SITES_DATA.length;
@@ -507,22 +526,30 @@ function updateProgressUI() {
   document.getElementById('progress-bar-fill').style.width = `${percent}%`;
 }
 
+// Build the status badges for a site card (shared by full render and in-place updates).
+function getBadgesHtml(site) {
+  const isVisited = state.visitedSites.has(site.id);
+  const isNearby = (state.distances[site.id] && state.distances[site.id] <= 50);
+  let badges = '';
+  if (isVisited) {
+    badges += `<span class="badge" style="background-color: var(--status-visited-glow); color: var(--status-visited);"><i class="fa-solid fa-check" aria-hidden="true"></i> Visited</span>`;
+  }
+  if (isNearby && !isVisited) {
+    badges += `<span class="badge" style="background-color: var(--status-nearby-glow); color: var(--status-nearby);"><i class="fa-solid fa-location-dot" aria-hidden="true"></i> Nearby!</span>`;
+  }
+  if (site.fee === "Free") {
+    badges += `<span class="badge"><i class="fa-solid fa-hand-holding-heart" aria-hidden="true"></i> Free</span>`;
+  }
+  return badges;
+}
+
 // Generate Timeline Card HTML
 function createSiteCard(site) {
   const isVisited = state.visitedSites.has(site.id);
   const isNearby = (state.distances[site.id] && state.distances[site.id] <= 50);
   const distanceStr = state.distances[site.id] ? formatDistance(state.distances[site.id]) : '';
-  
-  let badges = '';
-  if (isVisited) {
-    badges += `<span class="badge" style="background-color: var(--status-visited-glow); color: var(--status-visited);"><i class="fa-solid fa-check"></i> Visited</span>`;
-  }
-  if (isNearby && !isVisited) {
-    badges += `<span class="badge" style="background-color: var(--status-nearby-glow); color: var(--status-nearby);"><i class="fa-solid fa-location-dot"></i> Nearby!</span>`;
-  }
-  if (site.fee === "Free") {
-    badges += `<span class="badge"><i class="fa-solid fa-hand-holding-heart"></i> Free</span>`;
-  }
+
+  const badges = getBadgesHtml(site);
 
   const card = document.createElement('div');
   card.className = `site-card ${isVisited ? 'visited' : ''} ${isNearby && !isVisited ? 'nearby' : ''}`;
@@ -550,6 +577,43 @@ function renderTimeline() {
   container.innerHTML = '';
   SITES_DATA.forEach(site => {
     container.appendChild(createSiteCard(site));
+  });
+}
+
+// Update only the distance text and status badges/classes on existing cards.
+// Called on every GPS tick so we don't wipe & rebuild the list (which would
+// reset scroll position and interrupt any in-progress interaction).
+function updateTimelineDistances() {
+  const container = document.getElementById('sites-list');
+  if (!container || !container.children.length) return;
+
+  SITES_DATA.forEach(site => {
+    const card = container.querySelector(`.site-card[data-site-id="${site.id}"]`);
+    if (!card) return;
+
+    const dist = state.distances[site.id];
+    const isVisited = state.visitedSites.has(site.id);
+    const isNearby = dist && dist <= 50 && !isVisited;
+    const distanceStr = dist ? formatDistance(dist) : '';
+
+    // Distance chip
+    const titleRow = card.querySelector('.site-title-row');
+    let chip = card.querySelector('.site-distance');
+    if (distanceStr) {
+      if (!chip && titleRow) {
+        chip = document.createElement('span');
+        chip.className = 'site-distance';
+        titleRow.appendChild(chip);
+      }
+      if (chip) chip.textContent = distanceStr;
+    } else if (chip) {
+      chip.remove();
+    }
+
+    // Nearby highlight + badges
+    card.classList.toggle('nearby', !!isNearby);
+    const badgeWrap = card.querySelector('.site-meta-badges');
+    if (badgeWrap) badgeWrap.innerHTML = getBadgesHtml(site);
   });
 }
 
@@ -596,9 +660,9 @@ async function openDetailsDrawer(siteId) {
     <div class="factoid-list">
       ${site.factoids.map((fact, index) => `
         <div class="factoid-item">
-          <button class="factoid-trigger" onclick="toggleFactoid(this)">
+          <button class="factoid-trigger" onclick="toggleFactoid(this)" aria-expanded="false">
             <span>Factoid #${index + 1}</span>
-            <i class="fa-solid fa-chevron-down"></i>
+            <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
           </button>
           <div class="factoid-content">
             ${fact}
@@ -609,7 +673,7 @@ async function openDetailsDrawer(siteId) {
 
     <div class="detail-section-title">My Journal & Reflections</div>
     <div class="journal-entry-container">
-      <textarea id="drawer-journal-textarea" class="journal-textarea" placeholder="Write down your thoughts, memories, or stories about this historic site...">${journalText}</textarea>
+      <textarea id="drawer-journal-textarea" class="journal-textarea" placeholder="Write down your thoughts, memories, or stories about this historic site..."></textarea>
       <div class="autosave-indicator" id="autosave-indicator">All edits auto-saved locally</div>
     </div>
 
@@ -635,6 +699,8 @@ async function openDetailsDrawer(siteId) {
   // Bind Journal Auto-save on Input (Debounced)
   let saveTimeout = null;
   const textarea = document.getElementById('drawer-journal-textarea');
+  // Set value via property (never via innerHTML) so entries can't break out of the element.
+  textarea.value = journalText;
   textarea.addEventListener('input', () => {
     const text = textarea.value;
     const indicator = document.getElementById('autosave-indicator');
@@ -685,22 +751,28 @@ async function openDetailsDrawer(siteId) {
 // Helper to open accordion factoids
 window.toggleFactoid = function(button) {
   const item = button.closest('.factoid-item');
-  item.classList.toggle('expanded');
+  const expanded = item.classList.toggle('expanded');
+  button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
 };
 
 // Render photos in details drawer
 async function renderDrawerPhotos(siteId) {
   const photos = await getPhotos(siteId);
   const grid = document.getElementById('drawer-photo-grid');
-  
+  if (!grid) return;
+
+  // Revoke object URLs from the previous render before creating new ones.
+  revokeUrls(drawerPhotoUrls);
+
   // Remove all photo items, keep only the add-photo label button
   const items = grid.querySelectorAll('.photo-item-container');
   items.forEach(i => i.remove());
-  
+
   const cameraBtnWrapper = document.getElementById('camera-btn-wrapper');
-  
+
   photos.forEach(p => {
     const url = URL.createObjectURL(p.blob);
+    drawerPhotoUrls.push(url);
     const container = document.createElement('div');
     container.className = 'photo-item-container';
     container.innerHTML = `
@@ -770,9 +842,11 @@ function toggleSiteCheckin(siteId) {
 async function renderJournalTimeline() {
   const container = document.getElementById('journal-timeline-container');
   const emptyState = document.getElementById('journal-empty-state');
-  
+
+  // Revoke object URLs from the previous render before rebuilding.
+  revokeUrls(journalPhotoUrls);
   container.innerHTML = '';
-  
+
   const journals = await getAllJournals();
   const photos = await getAllPhotos();
   
@@ -807,6 +881,7 @@ async function renderJournalTimeline() {
       photosHtml = `<div class="journal-photos">`;
       sitePhotos.forEach(p => {
         const url = URL.createObjectURL(p.blob);
+        journalPhotoUrls.push(url);
         photosHtml += `<img src="${url}" class="journal-photo-thumbnail" alt="Journal Photo" onclick="openLightbox('${url}')">`;
       });
       photosHtml += `</div>`;
@@ -817,7 +892,7 @@ async function renderJournalTimeline() {
         <h4>#${site.id} - ${site.name}</h4>
         <span class="journal-date">${dateStr}</span>
       </div>
-      ${journal && journal.entryText.trim() ? `<p class="journal-text">${journal.entryText}</p>` : ''}
+      ${journal && journal.entryText.trim() ? `<p class="journal-text">${escapeHtml(journal.entryText)}</p>` : ''}
       ${photosHtml}
       <button class="secondary-btn sm-btn" style="margin-top: 10px; font-size: 0.72rem; padding: 6px 10px; border-radius: 6px;" onclick="openDetailsDrawer(${site.id})">
         <i class="fa-solid fa-edit"></i> Edit Entry
@@ -870,6 +945,299 @@ async function exportJournal() {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+  // Release the temporary download URL.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// --- CLOUD SHARE & BACKUP ---
+// Saves the adventure (visited stops + journal text + photos) to the backend so it
+// can be shared via a read-only link and restored on another device.
+const SHARE_ID_KEY = 'freedom_share_id';
+const SHARE_TOKEN_KEY = 'freedom_share_token';
+const SHARE_SAVED_KEY = 'freedom_share_saved_at';
+
+function updatePhotoRecord(record) {
+  return new Promise((resolve, reject) => {
+    if (!db) return reject(new Error('Database not initialized'));
+    const tx = db.transaction(['photos'], 'readwrite');
+    tx.objectStore('photos').put(record);
+    tx.oncomplete = () => resolve();
+    tx.onerror = (e) => reject(e.target.error);
+  });
+}
+
+// Upload a photo once; remember its Blob URL on the record to skip re-uploading.
+async function ensurePhotoUrl(photo) {
+  if (photo.uploadedUrl) return photo.uploadedUrl;
+  const res = await fetch('/api/upload', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'x-photo-type': photo.blob.type || 'image/jpeg',
+    },
+    body: photo.blob,
+  });
+  if (!res.ok) throw new Error('Photo upload failed');
+  const { url } = await res.json();
+  photo.uploadedUrl = url;
+  try { await updatePhotoRecord(photo); } catch (e) { /* non-fatal */ }
+  return url;
+}
+
+async function buildSharePayload(onProgress) {
+  const journals = await getAllJournals();
+  const allPhotos = await getAllPhotos();
+  const total = allPhotos.length;
+  let done = 0;
+  const entries = {};
+
+  for (const site of SITES_DATA) {
+    const j = journals.find((x) => x.siteId === site.id);
+    const sitePhotos = allPhotos.filter((p) => p.siteId === site.id);
+    const hasText = j && j.entryText && j.entryText.trim();
+    if (!hasText && sitePhotos.length === 0) continue;
+
+    const photoUrls = [];
+    for (const p of sitePhotos) {
+      photoUrls.push(await ensurePhotoUrl(p));
+      done++;
+      if (onProgress) onProgress(done, total);
+    }
+    entries[site.id] = {
+      name: site.name,
+      text: hasText ? j.entryText : '',
+      timestamp: j ? j.timestamp : (sitePhotos[0] ? sitePhotos[0].timestamp : Date.now()),
+      photos: photoUrls,
+    };
+  }
+
+  const visited = Array.from(state.visitedSites).map(Number);
+  return {
+    version: 1,
+    title: 'My Freedom Trail Adventure',
+    savedAt: Date.now(),
+    totalSites: SITES_DATA.length,
+    visitedCount: visited.length,
+    visited,
+    entries,
+  };
+}
+
+async function createNewShare(payload) {
+  const res = await fetch('/api/share', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ payload }),
+  });
+  if (!res.ok) throw new Error('Could not create cloud copy');
+  const data = await res.json();
+  localStorage.setItem(SHARE_ID_KEY, data.id);
+  localStorage.setItem(SHARE_TOKEN_KEY, data.editToken);
+  localStorage.setItem(SHARE_SAVED_KEY, String(payload.savedAt));
+  return { id: data.id, token: data.editToken };
+}
+
+async function saveToCloud(onProgress) {
+  const payload = await buildSharePayload(onProgress);
+  const existingId = localStorage.getItem(SHARE_ID_KEY);
+  const token = localStorage.getItem(SHARE_TOKEN_KEY);
+
+  if (existingId && token) {
+    const res = await fetch(`/api/share?id=${encodeURIComponent(existingId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'x-edit-token': token },
+      body: JSON.stringify({ payload }),
+    });
+    if (res.status === 404 || res.status === 403) {
+      // Stale/invalid local reference — start a fresh cloud copy.
+      return createNewShare(payload);
+    }
+    if (!res.ok) throw new Error('Could not update cloud copy');
+    localStorage.setItem(SHARE_SAVED_KEY, String(payload.savedAt));
+    return { id: existingId, token };
+  }
+  return createNewShare(payload);
+}
+
+async function deleteCloud() {
+  const id = localStorage.getItem(SHARE_ID_KEY);
+  const token = localStorage.getItem(SHARE_TOKEN_KEY);
+  if (id && token) {
+    try {
+      await fetch(`/api/share?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { 'x-edit-token': token },
+      });
+    } catch (e) { /* ignore */ }
+  }
+  localStorage.removeItem(SHARE_ID_KEY);
+  localStorage.removeItem(SHARE_TOKEN_KEY);
+  localStorage.removeItem(SHARE_SAVED_KEY);
+}
+
+// Pull a shared payload into this device's local storage (merge/overwrite).
+async function importSharedPayload(payload, id, token) {
+  if (!payload) return;
+
+  state.visitedSites = new Set((payload.visited || []).map(Number));
+  saveVisitedState();
+
+  const entries = payload.entries || {};
+  for (const key of Object.keys(entries)) {
+    const siteId = Number(key);
+    const e = entries[key];
+    if (e.text && e.text.trim()) {
+      await saveJournal(siteId, e.text);
+    }
+    if (Array.isArray(e.photos)) {
+      const existing = await getPhotos(siteId);
+      const existingUrls = new Set(existing.map((p) => p.uploadedUrl).filter(Boolean));
+      for (const url of e.photos) {
+        if (existingUrls.has(url)) continue; // idempotent re-import
+        try {
+          const resp = await fetch(url);
+          const blob = await resp.blob();
+          const newId = await addPhoto(siteId, blob);
+          await updatePhotoRecord({ id: newId, siteId, blob, timestamp: e.timestamp || Date.now(), uploadedUrl: url });
+        } catch (err) { console.warn('Photo import failed', err); }
+      }
+    }
+  }
+
+  if (id && token) {
+    localStorage.setItem(SHARE_ID_KEY, id);
+    localStorage.setItem(SHARE_TOKEN_KEY, token);
+    localStorage.setItem(SHARE_SAVED_KEY, String(payload.savedAt || Date.now()));
+  }
+
+  renderTimeline();
+  updateProgressUI();
+  if (state.currentTab === 'journal-tab') renderJournalTimeline();
+}
+
+async function restoreFromCode(code) {
+  const trimmed = (code || '').trim();
+  if (!trimmed) throw new Error('Enter a sync code first');
+  const [id, token] = trimmed.split('.');
+  const res = await fetch(`/api/share?id=${encodeURIComponent(id)}`);
+  if (res.status === 404) throw new Error('No adventure found for that code');
+  if (!res.ok) throw new Error('Could not fetch that adventure');
+  const data = await res.json();
+  await importSharedPayload(data.payload, id, token || null);
+  return data;
+}
+
+// --- SHARE MODAL UI ---
+function shareLinkFor(id) {
+  return `${location.origin}/s/${id}`;
+}
+
+function renderShareStatus() {
+  const status = document.getElementById('share-status');
+  const result = document.getElementById('share-result');
+  if (!status) return;
+  const id = localStorage.getItem(SHARE_ID_KEY);
+  const token = localStorage.getItem(SHARE_TOKEN_KEY);
+  const savedAt = Number(localStorage.getItem(SHARE_SAVED_KEY));
+
+  if (id && token) {
+    const when = savedAt ? new Date(savedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'previously';
+    status.innerHTML = `<i class="fa-solid fa-circle-check" style="color: var(--status-visited)" aria-hidden="true"></i> Cloud copy saved ${escapeHtml(when)}.`;
+    document.getElementById('share-link-input').value = shareLinkFor(id);
+    document.getElementById('sync-code-input').value = `${id}.${token}`;
+    result.classList.remove('hidden');
+    document.getElementById('save-cloud-btn').innerHTML = `<i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i> Update cloud copy`;
+  } else {
+    status.textContent = 'Not saved to the cloud yet.';
+    result.classList.add('hidden');
+    document.getElementById('save-cloud-btn').innerHTML = `<i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i> Save to cloud`;
+  }
+}
+
+function setupShareUI() {
+  const modal = document.getElementById('share-modal');
+  const openBtn = document.getElementById('share-journal-btn');
+  const closeBtn = document.getElementById('close-share-btn');
+  if (!modal || !openBtn) return;
+
+  const open = () => { renderShareStatus(); modal.classList.remove('hidden'); };
+  const close = () => modal.classList.add('hidden');
+  openBtn.addEventListener('click', open);
+  closeBtn.addEventListener('click', close);
+  modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+  const setMsg = (el, text, kind) => {
+    el.textContent = text;
+    el.style.color = kind === 'error' ? 'var(--accent-crimson)' : (kind === 'ok' ? 'var(--status-visited)' : 'var(--text-muted)');
+  };
+
+  document.getElementById('save-cloud-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('save-cloud-btn');
+    const status = document.getElementById('share-status');
+    btn.disabled = true;
+    const original = btn.innerHTML;
+    btn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Saving…`;
+    try {
+      await saveToCloud((done, total) => {
+        if (total) status.textContent = `Uploading photos… ${done}/${total}`;
+      });
+      renderShareStatus();
+    } catch (err) {
+      console.error(err);
+      status.innerHTML = `<i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i> ${escapeHtml(err.message || 'Save failed')}`;
+      btn.innerHTML = original;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  const copyFrom = async (inputId, btnId) => {
+    const input = document.getElementById(inputId);
+    const btn = document.getElementById(btnId);
+    try {
+      await navigator.clipboard.writeText(input.value);
+    } catch (e) {
+      input.select(); document.execCommand('copy');
+    }
+    const label = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = label; }, 1500);
+  };
+  document.getElementById('copy-link-btn').addEventListener('click', () => copyFrom('share-link-input', 'copy-link-btn'));
+  document.getElementById('copy-code-btn').addEventListener('click', () => copyFrom('sync-code-input', 'copy-code-btn'));
+
+  document.getElementById('native-share-btn').addEventListener('click', async () => {
+    const url = document.getElementById('share-link-input').value;
+    if (navigator.share) {
+      try { await navigator.share({ title: 'My Freedom Trail Adventure', text: 'Follow my walk along the Boston Freedom Trail:', url }); } catch (e) { /* cancelled */ }
+    } else {
+      copyFrom('share-link-input', 'native-share-btn');
+    }
+  });
+
+  document.getElementById('delete-cloud-btn').addEventListener('click', async () => {
+    if (!confirm('Delete the cloud copy and its shared link? Your local journal stays on this device.')) return;
+    await deleteCloud();
+    renderShareStatus();
+  });
+
+  document.getElementById('restore-btn').addEventListener('click', async () => {
+    const input = document.getElementById('restore-code-input');
+    const msg = document.getElementById('restore-msg');
+    const btn = document.getElementById('restore-btn');
+    btn.disabled = true;
+    setMsg(msg, 'Restoring…');
+    try {
+      await restoreFromCode(input.value);
+      setMsg(msg, 'Restored! Your adventure is now on this device.', 'ok');
+      input.value = '';
+      renderShareStatus();
+    } catch (err) {
+      setMsg(msg, err.message || 'Restore failed', 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  });
 }
 
 // --- GPS TRACKING & PROXIMITY ENGINE ---
@@ -932,9 +1300,10 @@ function calculateDistances() {
     proximityBanner.classList.add('hidden');
   }
   
-  // Re-render timeline and map with distances
-  renderTimeline();
-  drawMap();
+  // Update distances in place (no full rebuild) so the list keeps its scroll
+  // position, and only redraw the map when it's the visible tab.
+  updateTimelineDistances();
+  if (state.currentTab === 'map-tab') drawMap();
 }
 
 // --- MAP CANVAS RENDER ENGINE ---
@@ -1007,10 +1376,12 @@ function setupMapCanvas() {
   
   // External Map Button
   document.getElementById('external-map-btn').addEventListener('click', () => {
-    // Open in native Google Maps
-    // Route from Boston Common to Bunker Hill containing coordinates
-    const routeUrl = `https://www.google.com/maps/dir/?api=1&origin=42.3551,-71.0657&destination=42.3763,-71.0603&waypoints=42.3582,-71.0637%7C42.3569,-71.0620%7C42.3575,-71.0617%7C42.3569,-71.0607%7C42.3582,-71.0593%7C42.3571,-71.0583%7C42.3569,-71.0586%7C42.3587,-71.0575%7C42.3585,-71.0574%7C42.3600,-71.0561%7C42.3638,-71.0537%7C42.3665,-71.0545%7C42.3675,-71.0563%7C42.3725,-71.0566&travelmode=walking`;
-    window.open(routeUrl, '_blank');
+    // The `api=1&waypoints=` form caps at ~9 waypoints and errors with all 16 stops.
+    // The path-based /maps/dir/ form accepts every stop as a segment; the trailing
+    // data token requests walking mode.
+    const path = SITES_DATA.map(s => `${s.lat},${s.lng}`).join('/');
+    const routeUrl = `https://www.google.com/maps/dir/${path}/data=!4m2!4m1!3e2`;
+    window.open(routeUrl, '_blank', 'noopener');
   });
 }
 
@@ -1261,28 +1632,45 @@ function switchTab(tabId) {
 }
 
 // --- SETUP THEME SWITCHER ---
+// Keep the browser UI (status bar / address bar) tint in sync with the theme.
+function applyThemeColorMeta() {
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) return;
+  const isLight = document.body.classList.contains('light-mode');
+  meta.setAttribute('content', isLight ? '#f8fafc' : '#0b0f19');
+}
+
 function setupThemeSwitcher() {
   const toggleBtn = document.getElementById('theme-toggle-btn');
-  const storedTheme = localStorage.getItem('freedom_theme');
-  
-  if (storedTheme === 'light') {
-    document.body.classList.remove('dark-mode');
-    document.body.classList.add('light-mode');
-    toggleBtn.innerHTML = `<i class="fa-solid fa-moon"></i>`;
+
+  // The inline pre-paint script (in index.html) normally sets the theme class
+  // before first paint, respecting a saved choice, then the OS preference,
+  // defaulting to light. Resolve here too as a fallback in case it didn't run.
+  if (!document.body.classList.contains('light-mode') && !document.body.classList.contains('dark-mode')) {
+    const stored = localStorage.getItem('freedom_theme');
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const theme = stored || (prefersDark ? 'dark' : 'light');
+    document.body.classList.add(theme === 'dark' ? 'dark-mode' : 'light-mode');
   }
-  
+
+  // Reflect current theme on the toggle: show the icon of the theme you'd switch TO.
+  const syncToggleUI = () => {
+    const isLight = document.body.classList.contains('light-mode');
+    toggleBtn.innerHTML = isLight
+      ? `<i class="fa-solid fa-moon" aria-hidden="true"></i>`
+      : `<i class="fa-solid fa-sun" aria-hidden="true"></i>`;
+    toggleBtn.setAttribute('aria-label', isLight ? 'Switch to dark theme' : 'Switch to light theme');
+    applyThemeColorMeta();
+  };
+
+  syncToggleUI();
+
   toggleBtn.addEventListener('click', () => {
-    if (document.body.classList.contains('light-mode')) {
-      document.body.classList.remove('light-mode');
-      document.body.classList.add('dark-mode');
-      toggleBtn.innerHTML = `<i class="fa-solid fa-sun"></i>`;
-      localStorage.setItem('freedom_theme', 'dark');
-    } else {
-      document.body.classList.remove('dark-mode');
-      document.body.classList.add('light-mode');
-      toggleBtn.innerHTML = `<i class="fa-solid fa-moon"></i>`;
-      localStorage.setItem('freedom_theme', 'light');
-    }
+    const goingLight = document.body.classList.contains('dark-mode');
+    document.body.classList.toggle('dark-mode', !goingLight);
+    document.body.classList.toggle('light-mode', goingLight);
+    localStorage.setItem('freedom_theme', goingLight ? 'light' : 'dark');
+    syncToggleUI();
     // Re-draw map if open to update colors
     if (state.currentTab === 'map-tab') drawMap();
   });
@@ -1296,6 +1684,8 @@ function setupDrawerClose() {
   const closeDrawer = () => {
     overlay.classList.add('hidden');
     state.activeDetailSiteId = null;
+    // Release any photo object URLs created for the drawer.
+    revokeUrls(drawerPhotoUrls);
   };
   
   closeBtn.addEventListener('click', closeDrawer);
@@ -1345,6 +1735,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   
   // Export Journal Bind
   document.getElementById('export-journal-btn').addEventListener('click', exportJournal);
+
+  // Cloud share / backup UI
+  setupShareUI();
   
   // Register Service Worker for PWA
   if ('serviceWorker' in navigator) {

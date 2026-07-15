@@ -2,13 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Boston Freedom Trail Companion</title>
   
   <!-- SEO Meta Tags -->
   <meta name="description" content="A premium, offline-first companion app to guide, track, and journal your way along Boston's historic 2.5-mile Freedom Trail. 100% free and private.">
-  <meta name="theme-color" content="#bd2f2f">
+  <meta name="theme-color" content="#f8fafc">
   
+  <!-- Favicon: Paul Revere's midnight ride -->
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="icon-192.png" sizes="192x192" type="image/png">
+
   <!-- PWA Manifest & iOS Support -->
   <link rel="manifest" href="manifest.json">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -27,7 +31,20 @@
   <!-- Stylesheets -->
   <link rel="stylesheet" href="style.css">
 </head>
-<body class="dark-mode">
+<body>
+  <!-- Pre-paint theme resolver: applies saved theme, else the OS preference, defaulting to light. Runs before first paint to avoid a flash. -->
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('freedom_theme');
+        var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        var theme = saved || (prefersDark ? 'dark' : 'light');
+        document.body.classList.add(theme === 'dark' ? 'dark-mode' : 'light-mode');
+      } catch (e) {
+        document.body.classList.add('light-mode');
+      }
+    })();
+  </script>
   <div class="app-container">
     
     <!-- Top Header Bar -->
@@ -40,8 +57,8 @@
         </div>
       </div>
       <div class="header-actions">
-        <button id="theme-toggle-btn" class="icon-btn" title="Toggle Theme">
-          <i class="fa-solid fa-sun"></i>
+        <button id="theme-toggle-btn" class="icon-btn" title="Toggle Theme" aria-label="Toggle light or dark theme">
+          <i class="fa-solid fa-sun" aria-hidden="true"></i>
         </button>
       </div>
     </header>
@@ -106,17 +123,21 @@
           <div class="canvas-wrapper">
             <canvas id="map-canvas"></canvas>
             <div class="map-controls">
-              <button id="map-zoom-in" class="map-ctrl-btn" title="Zoom In"><i class="fa-solid fa-plus"></i></button>
-              <button id="map-zoom-out" class="map-ctrl-btn" title="Zoom Out"><i class="fa-solid fa-minus"></i></button>
-              <button id="map-recenter" class="map-ctrl-btn" title="Recenter"><i class="fa-solid fa-crosshairs"></i></button>
+              <button id="map-zoom-in" class="map-ctrl-btn" title="Zoom In" aria-label="Zoom in"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+              <button id="map-zoom-out" class="map-ctrl-btn" title="Zoom Out" aria-label="Zoom out"><i class="fa-solid fa-minus" aria-hidden="true"></i></button>
+              <button id="map-recenter" class="map-ctrl-btn" title="Recenter" aria-label="Recenter map"><i class="fa-solid fa-crosshairs" aria-hidden="true"></i></button>
             </div>
           </div>
           
           <div class="map-footer-actions">
-            <p class="map-hint"><i class="fa-solid fa-hand-pointer"></i> Drag to pan, pinch/scroll to zoom.</p>
+            <p class="map-hint"><i class="fa-solid fa-hand-pointer" aria-hidden="true"></i> Drag to pan, pinch/scroll to zoom.</p>
             <button id="external-map-btn" class="secondary-btn">
-              <i class="fa-solid fa-map-location-dot"></i> Open in Google Maps
+              <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i> Open in Google Maps
             </button>
+            <div class="map-resource-links">
+              <a href="ft-map.pdf" target="_blank" rel="noopener"><i class="fa-solid fa-file-pdf" aria-hidden="true"></i> Official Trail Map (PDF)</a>
+              <a href="Freedom%20Trail%20Brochure%202025.pdf" target="_blank" rel="noopener"><i class="fa-solid fa-book" aria-hidden="true"></i> Visitor Brochure (PDF)</a>
+            </div>
           </div>
         </div>
       </section>
@@ -126,9 +147,14 @@
         <div class="journal-header">
           <div class="journal-title-row">
             <h3>My Travel Journal</h3>
-            <button id="export-journal-btn" class="primary-btn sm-btn">
-              <i class="fa-solid fa-file-export"></i> Export Journal
-            </button>
+            <div class="journal-actions">
+              <button id="share-journal-btn" class="primary-btn sm-btn">
+                <i class="fa-solid fa-share-nodes" aria-hidden="true"></i> Share &amp; Back Up
+              </button>
+              <button id="export-journal-btn" class="secondary-btn sm-btn">
+                <i class="fa-solid fa-file-export" aria-hidden="true"></i> Export
+              </button>
+            </div>
           </div>
           <p class="section-desc">A log of your thoughts, memories, and photos captured along the trail.</p>
         </div>
@@ -149,15 +175,15 @@
     <!-- Bottom Navigation Bar -->
     <nav class="app-nav">
       <button class="nav-item active" data-tab="timeline-tab" id="nav-btn-timeline">
-        <i class="fa-solid fa-route"></i>
+        <i class="fa-solid fa-route" aria-hidden="true"></i>
         <span>Trail List</span>
       </button>
       <button class="nav-item" data-tab="map-tab" id="nav-btn-map">
-        <i class="fa-solid fa-map"></i>
+        <i class="fa-solid fa-map" aria-hidden="true"></i>
         <span>Map</span>
       </button>
       <button class="nav-item" data-tab="journal-tab" id="nav-btn-journal">
-        <i class="fa-solid fa-book-open"></i>
+        <i class="fa-solid fa-book-open" aria-hidden="true"></i>
         <span>My Journal</span>
       </button>
     </nav>
@@ -168,14 +194,62 @@
         <!-- Close button & drag indicator -->
         <div class="drawer-handle-bar">
           <div class="drawer-drag-handle"></div>
-          <button id="close-drawer-btn" class="close-btn" title="Close details">
-            <i class="fa-solid fa-xmark"></i>
+          <button id="close-drawer-btn" class="close-btn" title="Close details" aria-label="Close details">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
           </button>
         </div>
 
         <div class="drawer-body" id="drawer-body-content">
           <!-- Dynamically generated details content: -->
           <!-- Title, Check-in status, quick details, descriptions, factoids, photos and journal entry field -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Share & Back Up Modal -->
+    <div id="share-modal" class="drawer-overlay hidden">
+      <div class="share-modal-content">
+        <div class="share-modal-header">
+          <h3><i class="fa-solid fa-share-nodes" aria-hidden="true"></i> Share &amp; Back Up</h3>
+          <button id="close-share-btn" class="close-btn" title="Close" aria-label="Close">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="share-modal-body">
+          <p class="share-intro">Save your adventure to the cloud to share a read-only link with friends &amp; family — or restore it on another device. Your photos and journal come along.</p>
+
+          <div id="share-status" class="share-status">Not saved to the cloud yet.</div>
+          <button id="save-cloud-btn" class="primary-btn">
+            <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i> Save to cloud
+          </button>
+
+          <div id="share-result" class="share-result hidden">
+            <label class="share-label">Public link (view only)</label>
+            <div class="copy-row">
+              <input id="share-link-input" class="share-input" readonly>
+              <button id="copy-link-btn" class="secondary-btn sm-btn">Copy</button>
+            </div>
+            <button id="native-share-btn" class="secondary-btn sm-btn share-full">
+              <i class="fa-solid fa-share" aria-hidden="true"></i> Share…
+            </button>
+
+            <label class="share-label">Sync code (restore on your other device)</label>
+            <div class="copy-row">
+              <input id="sync-code-input" class="share-input" readonly>
+              <button id="copy-code-btn" class="secondary-btn sm-btn">Copy</button>
+            </div>
+            <button id="delete-cloud-btn" class="danger-link">Delete cloud copy</button>
+          </div>
+
+          <hr class="share-divider">
+
+          <label class="share-label">Restore on this device</label>
+          <p class="share-hint">Paste a sync code from your other device to bring your adventure here.</p>
+          <div class="copy-row">
+            <input id="restore-code-input" class="share-input" placeholder="e.g. ab3k9xh2mq.xxxxxxxx">
+            <button id="restore-btn" class="secondary-btn sm-btn">Restore</button>
+          </div>
+          <div id="restore-msg" class="share-hint"></div>
         </div>
       </div>
     </div>
