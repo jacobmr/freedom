@@ -649,6 +649,28 @@ body.light-mode .canvas-wrapper {
   border-color: var(--text-secondary);
 }
 
+.map-resource-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 18px;
+}
+
+.map-resource-links a {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.map-resource-links a:hover {
+  color: var(--accent-crimson);
+  text-decoration: underline;
+}
+
 /* Tab 3: Journal Styling */
 .journal-header {
   margin-bottom: 16px;

@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Boston Freedom Trail Companion</title>
   
   <!-- SEO Meta Tags -->
   <meta name="description" content="A premium, offline-first companion app to guide, track, and journal your way along Boston's historic 2.5-mile Freedom Trail. 100% free and private.">
-  <meta name="theme-color" content="#bd2f2f">
+  <meta name="theme-color" content="#f8fafc">
   
   <!-- PWA Manifest & iOS Support -->
   <link rel="manifest" href="manifest.json">
@@ -27,7 +27,20 @@
   <!-- Stylesheets -->
   <link rel="stylesheet" href="style.css">
 </head>
-<body class="dark-mode">
+<body>
+  <!-- Pre-paint theme resolver: applies saved theme, else the OS preference, defaulting to light. Runs before first paint to avoid a flash. -->
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('freedom_theme');
+        var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        var theme = saved || (prefersDark ? 'dark' : 'light');
+        document.body.classList.add(theme === 'dark' ? 'dark-mode' : 'light-mode');
+      } catch (e) {
+        document.body.classList.add('light-mode');
+      }
+    })();
+  </script>
   <div class="app-container">
     
     <!-- Top Header Bar -->
@@ -40,8 +53,8 @@
         </div>
       </div>
       <div class="header-actions">
-        <button id="theme-toggle-btn" class="icon-btn" title="Toggle Theme">
-          <i class="fa-solid fa-sun"></i>
+        <button id="theme-toggle-btn" class="icon-btn" title="Toggle Theme" aria-label="Toggle light or dark theme">
+          <i class="fa-solid fa-sun" aria-hidden="true"></i>
         </button>
       </div>
     </header>
@@ -106,17 +119,21 @@
           <div class="canvas-wrapper">
             <canvas id="map-canvas"></canvas>
             <div class="map-controls">
-              <button id="map-zoom-in" class="map-ctrl-btn" title="Zoom In"><i class="fa-solid fa-plus"></i></button>
-              <button id="map-zoom-out" class="map-ctrl-btn" title="Zoom Out"><i class="fa-solid fa-minus"></i></button>
-              <button id="map-recenter" class="map-ctrl-btn" title="Recenter"><i class="fa-solid fa-crosshairs"></i></button>
+              <button id="map-zoom-in" class="map-ctrl-btn" title="Zoom In" aria-label="Zoom in"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+              <button id="map-zoom-out" class="map-ctrl-btn" title="Zoom Out" aria-label="Zoom out"><i class="fa-solid fa-minus" aria-hidden="true"></i></button>
+              <button id="map-recenter" class="map-ctrl-btn" title="Recenter" aria-label="Recenter map"><i class="fa-solid fa-crosshairs" aria-hidden="true"></i></button>
             </div>
           </div>
           
           <div class="map-footer-actions">
-            <p class="map-hint"><i class="fa-solid fa-hand-pointer"></i> Drag to pan, pinch/scroll to zoom.</p>
+            <p class="map-hint"><i class="fa-solid fa-hand-pointer" aria-hidden="true"></i> Drag to pan, pinch/scroll to zoom.</p>
             <button id="external-map-btn" class="secondary-btn">
-              <i class="fa-solid fa-map-location-dot"></i> Open in Google Maps
+              <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i> Open in Google Maps
             </button>
+            <div class="map-resource-links">
+              <a href="ft-map.pdf" target="_blank" rel="noopener"><i class="fa-solid fa-file-pdf" aria-hidden="true"></i> Official Trail Map (PDF)</a>
+              <a href="Freedom%20Trail%20Brochure%202025.pdf" target="_blank" rel="noopener"><i class="fa-solid fa-book" aria-hidden="true"></i> Visitor Brochure (PDF)</a>
+            </div>
           </div>
         </div>
       </section>
@@ -149,15 +166,15 @@
     <!-- Bottom Navigation Bar -->
     <nav class="app-nav">
       <button class="nav-item active" data-tab="timeline-tab" id="nav-btn-timeline">
-        <i class="fa-solid fa-route"></i>
+        <i class="fa-solid fa-route" aria-hidden="true"></i>
         <span>Trail List</span>
       </button>
       <button class="nav-item" data-tab="map-tab" id="nav-btn-map">
-        <i class="fa-solid fa-map"></i>
+        <i class="fa-solid fa-map" aria-hidden="true"></i>
         <span>Map</span>
       </button>
       <button class="nav-item" data-tab="journal-tab" id="nav-btn-journal">
-        <i class="fa-solid fa-book-open"></i>
+        <i class="fa-solid fa-book-open" aria-hidden="true"></i>
         <span>My Journal</span>
       </button>
     </nav>
@@ -168,8 +185,8 @@
         <!-- Close button & drag indicator -->
         <div class="drawer-handle-bar">
           <div class="drawer-drag-handle"></div>
-          <button id="close-drawer-btn" class="close-btn" title="Close details">
-            <i class="fa-solid fa-xmark"></i>
+          <button id="close-drawer-btn" class="close-btn" title="Close details" aria-label="Close details">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
           </button>
         </div>
 

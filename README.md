@@ -14,8 +14,8 @@ Features:
 
 ## Technical Stack
 
-- **Core:** HTML5, Modular Javascript (ES6)
-- **Styling:** CSS3 variables, HSL color tokens, glassmorphism, Dark/Light mode
+- **Core:** HTML5, vanilla JavaScript (ES6, single `app.js`, no build step)
+- **Styling:** CSS3 custom properties, glassmorphism, Light/Dark mode (defaults to your OS preference)
 - **PWA support:** `manifest.json`, `sw.js` (Service Worker)
 - **Storage:** `localStorage` (check-ins), `IndexedDB` (journals and compressed images)
 
