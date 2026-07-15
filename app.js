@@ -949,6 +949,297 @@ async function exportJournal() {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// --- CLOUD SHARE & BACKUP ---
+// Saves the adventure (visited stops + journal text + photos) to the backend so it
+// can be shared via a read-only link and restored on another device.
+const SHARE_ID_KEY = 'freedom_share_id';
+const SHARE_TOKEN_KEY = 'freedom_share_token';
+const SHARE_SAVED_KEY = 'freedom_share_saved_at';
+
+function updatePhotoRecord(record) {
+  return new Promise((resolve, reject) => {
+    if (!db) return reject(new Error('Database not initialized'));
+    const tx = db.transaction(['photos'], 'readwrite');
+    tx.objectStore('photos').put(record);
+    tx.oncomplete = () => resolve();
+    tx.onerror = (e) => reject(e.target.error);
+  });
+}
+
+// Upload a photo once; remember its Blob URL on the record to skip re-uploading.
+async function ensurePhotoUrl(photo) {
+  if (photo.uploadedUrl) return photo.uploadedUrl;
+  const res = await fetch('/api/upload', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'x-photo-type': photo.blob.type || 'image/jpeg',
+    },
+    body: photo.blob,
+  });
+  if (!res.ok) throw new Error('Photo upload failed');
+  const { url } = await res.json();
+  photo.uploadedUrl = url;
+  try { await updatePhotoRecord(photo); } catch (e) { /* non-fatal */ }
+  return url;
+}
+
+async function buildSharePayload(onProgress) {
+  const journals = await getAllJournals();
+  const allPhotos = await getAllPhotos();
+  const total = allPhotos.length;
+  let done = 0;
+  const entries = {};
+
+  for (const site of SITES_DATA) {
+    const j = journals.find((x) => x.siteId === site.id);
+    const sitePhotos = allPhotos.filter((p) => p.siteId === site.id);
+    const hasText = j && j.entryText && j.entryText.trim();
+    if (!hasText && sitePhotos.length === 0) continue;
+
+    const photoUrls = [];
+    for (const p of sitePhotos) {
+      photoUrls.push(await ensurePhotoUrl(p));
+      done++;
+      if (onProgress) onProgress(done, total);
+    }
+    entries[site.id] = {
+      name: site.name,
+      text: hasText ? j.entryText : '',
+      timestamp: j ? j.timestamp : (sitePhotos[0] ? sitePhotos[0].timestamp : Date.now()),
+      photos: photoUrls,
+    };
+  }
+
+  const visited = Array.from(state.visitedSites).map(Number);
+  return {
+    version: 1,
+    title: 'My Freedom Trail Adventure',
+    savedAt: Date.now(),
+    totalSites: SITES_DATA.length,
+    visitedCount: visited.length,
+    visited,
+    entries,
+  };
+}
+
+async function createNewShare(payload) {
+  const res = await fetch('/api/share', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ payload }),
+  });
+  if (!res.ok) throw new Error('Could not create cloud copy');
+  const data = await res.json();
+  localStorage.setItem(SHARE_ID_KEY, data.id);
+  localStorage.setItem(SHARE_TOKEN_KEY, data.editToken);
+  localStorage.setItem(SHARE_SAVED_KEY, String(payload.savedAt));
+  return { id: data.id, token: data.editToken };
+}
+
+async function saveToCloud(onProgress) {
+  const payload = await buildSharePayload(onProgress);
+  const existingId = localStorage.getItem(SHARE_ID_KEY);
+  const token = localStorage.getItem(SHARE_TOKEN_KEY);
+
+  if (existingId && token) {
+    const res = await fetch(`/api/share?id=${encodeURIComponent(existingId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'x-edit-token': token },
+      body: JSON.stringify({ payload }),
+    });
+    if (res.status === 404 || res.status === 403) {
+      // Stale/invalid local reference — start a fresh cloud copy.
+      return createNewShare(payload);
+    }
+    if (!res.ok) throw new Error('Could not update cloud copy');
+    localStorage.setItem(SHARE_SAVED_KEY, String(payload.savedAt));
+    return { id: existingId, token };
+  }
+  return createNewShare(payload);
+}
+
+async function deleteCloud() {
+  const id = localStorage.getItem(SHARE_ID_KEY);
+  const token = localStorage.getItem(SHARE_TOKEN_KEY);
+  if (id && token) {
+    try {
+      await fetch(`/api/share?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { 'x-edit-token': token },
+      });
+    } catch (e) { /* ignore */ }
+  }
+  localStorage.removeItem(SHARE_ID_KEY);
+  localStorage.removeItem(SHARE_TOKEN_KEY);
+  localStorage.removeItem(SHARE_SAVED_KEY);
+}
+
+// Pull a shared payload into this device's local storage (merge/overwrite).
+async function importSharedPayload(payload, id, token) {
+  if (!payload) return;
+
+  state.visitedSites = new Set((payload.visited || []).map(Number));
+  saveVisitedState();
+
+  const entries = payload.entries || {};
+  for (const key of Object.keys(entries)) {
+    const siteId = Number(key);
+    const e = entries[key];
+    if (e.text && e.text.trim()) {
+      await saveJournal(siteId, e.text);
+    }
+    if (Array.isArray(e.photos)) {
+      const existing = await getPhotos(siteId);
+      const existingUrls = new Set(existing.map((p) => p.uploadedUrl).filter(Boolean));
+      for (const url of e.photos) {
+        if (existingUrls.has(url)) continue; // idempotent re-import
+        try {
+          const resp = await fetch(url);
+          const blob = await resp.blob();
+          const newId = await addPhoto(siteId, blob);
+          await updatePhotoRecord({ id: newId, siteId, blob, timestamp: e.timestamp || Date.now(), uploadedUrl: url });
+        } catch (err) { console.warn('Photo import failed', err); }
+      }
+    }
+  }
+
+  if (id && token) {
+    localStorage.setItem(SHARE_ID_KEY, id);
+    localStorage.setItem(SHARE_TOKEN_KEY, token);
+    localStorage.setItem(SHARE_SAVED_KEY, String(payload.savedAt || Date.now()));
+  }
+
+  renderTimeline();
+  updateProgressUI();
+  if (state.currentTab === 'journal-tab') renderJournalTimeline();
+}
+
+async function restoreFromCode(code) {
+  const trimmed = (code || '').trim();
+  if (!trimmed) throw new Error('Enter a sync code first');
+  const [id, token] = trimmed.split('.');
+  const res = await fetch(`/api/share?id=${encodeURIComponent(id)}`);
+  if (res.status === 404) throw new Error('No adventure found for that code');
+  if (!res.ok) throw new Error('Could not fetch that adventure');
+  const data = await res.json();
+  await importSharedPayload(data.payload, id, token || null);
+  return data;
+}
+
+// --- SHARE MODAL UI ---
+function shareLinkFor(id) {
+  return `${location.origin}/s/${id}`;
+}
+
+function renderShareStatus() {
+  const status = document.getElementById('share-status');
+  const result = document.getElementById('share-result');
+  if (!status) return;
+  const id = localStorage.getItem(SHARE_ID_KEY);
+  const token = localStorage.getItem(SHARE_TOKEN_KEY);
+  const savedAt = Number(localStorage.getItem(SHARE_SAVED_KEY));
+
+  if (id && token) {
+    const when = savedAt ? new Date(savedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'previously';
+    status.innerHTML = `<i class="fa-solid fa-circle-check" style="color: var(--status-visited)" aria-hidden="true"></i> Cloud copy saved ${escapeHtml(when)}.`;
+    document.getElementById('share-link-input').value = shareLinkFor(id);
+    document.getElementById('sync-code-input').value = `${id}.${token}`;
+    result.classList.remove('hidden');
+    document.getElementById('save-cloud-btn').innerHTML = `<i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i> Update cloud copy`;
+  } else {
+    status.textContent = 'Not saved to the cloud yet.';
+    result.classList.add('hidden');
+    document.getElementById('save-cloud-btn').innerHTML = `<i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i> Save to cloud`;
+  }
+}
+
+function setupShareUI() {
+  const modal = document.getElementById('share-modal');
+  const openBtn = document.getElementById('share-journal-btn');
+  const closeBtn = document.getElementById('close-share-btn');
+  if (!modal || !openBtn) return;
+
+  const open = () => { renderShareStatus(); modal.classList.remove('hidden'); };
+  const close = () => modal.classList.add('hidden');
+  openBtn.addEventListener('click', open);
+  closeBtn.addEventListener('click', close);
+  modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+  const setMsg = (el, text, kind) => {
+    el.textContent = text;
+    el.style.color = kind === 'error' ? 'var(--accent-crimson)' : (kind === 'ok' ? 'var(--status-visited)' : 'var(--text-muted)');
+  };
+
+  document.getElementById('save-cloud-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('save-cloud-btn');
+    const status = document.getElementById('share-status');
+    btn.disabled = true;
+    const original = btn.innerHTML;
+    btn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Saving…`;
+    try {
+      await saveToCloud((done, total) => {
+        if (total) status.textContent = `Uploading photos… ${done}/${total}`;
+      });
+      renderShareStatus();
+    } catch (err) {
+      console.error(err);
+      status.innerHTML = `<i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i> ${escapeHtml(err.message || 'Save failed')}`;
+      btn.innerHTML = original;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  const copyFrom = async (inputId, btnId) => {
+    const input = document.getElementById(inputId);
+    const btn = document.getElementById(btnId);
+    try {
+      await navigator.clipboard.writeText(input.value);
+    } catch (e) {
+      input.select(); document.execCommand('copy');
+    }
+    const label = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = label; }, 1500);
+  };
+  document.getElementById('copy-link-btn').addEventListener('click', () => copyFrom('share-link-input', 'copy-link-btn'));
+  document.getElementById('copy-code-btn').addEventListener('click', () => copyFrom('sync-code-input', 'copy-code-btn'));
+
+  document.getElementById('native-share-btn').addEventListener('click', async () => {
+    const url = document.getElementById('share-link-input').value;
+    if (navigator.share) {
+      try { await navigator.share({ title: 'My Freedom Trail Adventure', text: 'Follow my walk along the Boston Freedom Trail:', url }); } catch (e) { /* cancelled */ }
+    } else {
+      copyFrom('share-link-input', 'native-share-btn');
+    }
+  });
+
+  document.getElementById('delete-cloud-btn').addEventListener('click', async () => {
+    if (!confirm('Delete the cloud copy and its shared link? Your local journal stays on this device.')) return;
+    await deleteCloud();
+    renderShareStatus();
+  });
+
+  document.getElementById('restore-btn').addEventListener('click', async () => {
+    const input = document.getElementById('restore-code-input');
+    const msg = document.getElementById('restore-msg');
+    const btn = document.getElementById('restore-btn');
+    btn.disabled = true;
+    setMsg(msg, 'Restoring…');
+    try {
+      await restoreFromCode(input.value);
+      setMsg(msg, 'Restored! Your adventure is now on this device.', 'ok');
+      input.value = '';
+      renderShareStatus();
+    } catch (err) {
+      setMsg(msg, err.message || 'Restore failed', 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
 // --- GPS TRACKING & PROXIMITY ENGINE ---
 function initGeolocation() {
   if (!navigator.geolocation) {
@@ -1444,6 +1735,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   
   // Export Journal Bind
   document.getElementById('export-journal-btn').addEventListener('click', exportJournal);
+
+  // Cloud share / backup UI
+  setupShareUI();
   
   // Register Service Worker for PWA
   if ('serviceWorker' in navigator) {

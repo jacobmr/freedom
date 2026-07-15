@@ -9,6 +9,10 @@
   <meta name="description" content="A premium, offline-first companion app to guide, track, and journal your way along Boston's historic 2.5-mile Freedom Trail. 100% free and private.">
   <meta name="theme-color" content="#f8fafc">
   
+  <!-- Favicon: Paul Revere's midnight ride -->
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="icon-192.png" sizes="192x192" type="image/png">
+
   <!-- PWA Manifest & iOS Support -->
   <link rel="manifest" href="manifest.json">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -143,9 +147,14 @@
         <div class="journal-header">
           <div class="journal-title-row">
             <h3>My Travel Journal</h3>
-            <button id="export-journal-btn" class="primary-btn sm-btn">
-              <i class="fa-solid fa-file-export"></i> Export Journal
-            </button>
+            <div class="journal-actions">
+              <button id="share-journal-btn" class="primary-btn sm-btn">
+                <i class="fa-solid fa-share-nodes" aria-hidden="true"></i> Share &amp; Back Up
+              </button>
+              <button id="export-journal-btn" class="secondary-btn sm-btn">
+                <i class="fa-solid fa-file-export" aria-hidden="true"></i> Export
+              </button>
+            </div>
           </div>
           <p class="section-desc">A log of your thoughts, memories, and photos captured along the trail.</p>
         </div>
@@ -193,6 +202,54 @@
         <div class="drawer-body" id="drawer-body-content">
           <!-- Dynamically generated details content: -->
           <!-- Title, Check-in status, quick details, descriptions, factoids, photos and journal entry field -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Share & Back Up Modal -->
+    <div id="share-modal" class="drawer-overlay hidden">
+      <div class="share-modal-content">
+        <div class="share-modal-header">
+          <h3><i class="fa-solid fa-share-nodes" aria-hidden="true"></i> Share &amp; Back Up</h3>
+          <button id="close-share-btn" class="close-btn" title="Close" aria-label="Close">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="share-modal-body">
+          <p class="share-intro">Save your adventure to the cloud to share a read-only link with friends &amp; family — or restore it on another device. Your photos and journal come along.</p>
+
+          <div id="share-status" class="share-status">Not saved to the cloud yet.</div>
+          <button id="save-cloud-btn" class="primary-btn">
+            <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i> Save to cloud
+          </button>
+
+          <div id="share-result" class="share-result hidden">
+            <label class="share-label">Public link (view only)</label>
+            <div class="copy-row">
+              <input id="share-link-input" class="share-input" readonly>
+              <button id="copy-link-btn" class="secondary-btn sm-btn">Copy</button>
+            </div>
+            <button id="native-share-btn" class="secondary-btn sm-btn share-full">
+              <i class="fa-solid fa-share" aria-hidden="true"></i> Share…
+            </button>
+
+            <label class="share-label">Sync code (restore on your other device)</label>
+            <div class="copy-row">
+              <input id="sync-code-input" class="share-input" readonly>
+              <button id="copy-code-btn" class="secondary-btn sm-btn">Copy</button>
+            </div>
+            <button id="delete-cloud-btn" class="danger-link">Delete cloud copy</button>
+          </div>
+
+          <hr class="share-divider">
+
+          <label class="share-label">Restore on this device</label>
+          <p class="share-hint">Paste a sync code from your other device to bring your adventure here.</p>
+          <div class="copy-row">
+            <input id="restore-code-input" class="share-input" placeholder="e.g. ab3k9xh2mq.xxxxxxxx">
+            <button id="restore-btn" class="secondary-btn sm-btn">Restore</button>
+          </div>
+          <div id="restore-msg" class="share-hint"></div>
         </div>
       </div>
     </div>

@@ -1,0 +1,14 @@
+{
+  "name": "freedom-trail-companion",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Boston Freedom Trail PWA companion — static frontend + Vercel serverless API for cloud share/backup.",
+  "scripts": {
+    "init-db": "node scripts/init-db.mjs"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.14.0",
+    "@vercel/blob": "^2.6.1"
+  }
+}
