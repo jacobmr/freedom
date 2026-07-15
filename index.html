@@ -27,6 +27,10 @@
   
   <!-- FontAwesome Icons (for premium look) -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <!-- Leaflet (real street map when online) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
   
   <!-- Stylesheets -->
   <link rel="stylesheet" href="style.css">
@@ -114,19 +118,26 @@
         <div class="map-view-container">
           <div class="map-header-overlay">
             <h3>Trail Map</h3>
-            <span class="map-status" id="map-gps-status">
-              <i class="fa-solid fa-circle-notch fa-spin"></i> Locating...
-            </span>
+            <div class="map-header-right">
+              <button id="toggle-taverns-btn" class="map-pill" aria-pressed="false" title="Show taverns & treats">
+                <i class="fa-solid fa-mug-saucer" aria-hidden="true"></i> Taverns
+              </button>
+              <span class="map-status" id="map-gps-status">
+                <i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Locating...
+              </span>
+            </div>
           </div>
-          
-          <!-- Canvas containing custom coordinate projected map -->
+
+          <!-- Real street map (online) overlaid with the canvas diagram (offline fallback) -->
           <div class="canvas-wrapper">
+            <div id="leaflet-map"></div>
             <canvas id="map-canvas"></canvas>
             <div class="map-controls">
               <button id="map-zoom-in" class="map-ctrl-btn" title="Zoom In" aria-label="Zoom in"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
               <button id="map-zoom-out" class="map-ctrl-btn" title="Zoom Out" aria-label="Zoom out"><i class="fa-solid fa-minus" aria-hidden="true"></i></button>
               <button id="map-recenter" class="map-ctrl-btn" title="Recenter" aria-label="Recenter map"><i class="fa-solid fa-crosshairs" aria-hidden="true"></i></button>
             </div>
+            <div id="map-caption" class="map-caption hidden">Tap a stop to see its name</div>
           </div>
           
           <div class="map-footer-actions">
@@ -142,7 +153,18 @@
         </div>
       </section>
 
-      <!-- TAB 3: Journal Timeline / History View -->
+      <!-- TAB 3: Taverns & Treats — curated food/coffee stops along the trail -->
+      <section id="taverns-tab" class="tab-view">
+        <div class="timeline-header">
+          <h3>Taverns &amp; Treats</h3>
+          <p class="section-desc">Hand-picked coffee, pastry, and historic tavern stops to rest and refuel along the Trail. Curated favorites — not sponsored.</p>
+        </div>
+        <div id="taverns-list" class="taverns-list">
+          <!-- Dynamically populated recommendation cards -->
+        </div>
+      </section>
+
+      <!-- TAB 4: Journal Timeline / History View -->
       <section id="journal-tab" class="tab-view">
         <div class="journal-header">
           <div class="journal-title-row">
@@ -181,6 +203,10 @@
       <button class="nav-item" data-tab="map-tab" id="nav-btn-map">
         <i class="fa-solid fa-map" aria-hidden="true"></i>
         <span>Map</span>
+      </button>
+      <button class="nav-item" data-tab="taverns-tab" id="nav-btn-taverns">
+        <i class="fa-solid fa-mug-saucer" aria-hidden="true"></i>
+        <span>Taverns</span>
       </button>
       <button class="nav-item" data-tab="journal-tab" id="nav-btn-journal">
         <i class="fa-solid fa-book-open" aria-hidden="true"></i>
