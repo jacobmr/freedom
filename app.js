@@ -250,6 +250,25 @@ const SITES_DATA = [
   }
 ];
 
+// --- TAVERNS & TREATS: curated food/coffee stops along the trail (organic, not sponsored) ---
+// Coordinates are approximate (good enough for proximity sorting). Editable data, no ads.
+const TAVERNS_DATA = [
+  { name: "Thinking Cup", category: "Coffee", nearStop: 1, lat: 42.3547, lng: -71.0637, address: "165 Tremont St, Boston", website: "thinkingcup.info", blurb: "Beloved local espresso bar right on Boston Common — a perfect way to caffeinate before you set out." },
+  { name: "JP Licks", category: "Ice Cream", nearStop: 2, lat: 42.3585, lng: -71.0705, address: "150 Charles St, Boston", website: "jplicks.com", blurb: "Boston's own ice-cream institution since 1981, a short stroll off Beacon Hill." },
+  { name: "George Howell Coffee", category: "Coffee", nearStop: 8, lat: 42.3554, lng: -71.0603, address: "505 Washington St, Boston", website: "georgehowellcoffee.com", blurb: "Flagship specialty roaster in Downtown Crossing — serious coffee for the midtown stretch." },
+  { name: "Sam LaGrassa's", category: "Deli & Sandwiches", nearStop: 10, lat: 42.3573, lng: -71.0596, address: "44 Province St, Boston", website: "samlagrassas.com", blurb: "Legendary counter-service sandwiches (since 1968) a block off the Trail. Cash-fast, tourist-approved." },
+  { name: "Green Dragon Tavern", category: "Historic Tavern", nearStop: 11, lat: 42.3609, lng: -71.0575, address: "11 Marshall St, Boston", website: "greendragonboston.com", blurb: "Nicknamed the 'Headquarters of the Revolution' — patriots met at the original nearby. A must for tavern lore." },
+  { name: "Bell in Hand Tavern", category: "Historic Tavern", nearStop: 11, lat: 42.3608, lng: -71.0568, address: "45 Union St, Boston", website: "bellinhand.com", blurb: "Established 1795 and billed as America's oldest continuously operating tavern, steps from Faneuil Hall." },
+  { name: "Union Oyster House", category: "Seafood", nearStop: 11, lat: 42.3607, lng: -71.0570, address: "41 Union St, Boston", website: "unionoysterhouse.com", blurb: "America's oldest restaurant (1826), right on the Trail — oysters, chowder, and colonial atmosphere." },
+  { name: "Neptune Oyster", category: "Seafood", nearStop: 12, lat: 42.3630, lng: -71.0567, address: "63 Salem St, Boston", website: "neptuneoyster.com", blurb: "Tiny, Michelin-noted North End oyster bar famous for its hot buttered lobster roll. Expect a line." },
+  { name: "Modern Pastry", category: "Pastry & Cannoli", nearStop: 12, lat: 42.3634, lng: -71.0552, address: "257 Hanover St, Boston", website: "modernpastry.com", blurb: "North End cannoli royalty, filled to order. The classic Mike's-vs-Modern debate starts here." },
+  { name: "Mike's Pastry", category: "Pastry & Cannoli", nearStop: 12, lat: 42.3639, lng: -71.0546, address: "300 Hanover St, Boston", website: "mikespastry.com", blurb: "The iconic 1946 pastry shop with 19 kinds of cannoli. Grab a string-tied blue box." },
+  { name: "Mamma Maria", category: "Italian", nearStop: 12, lat: 42.3639, lng: -71.0538, address: "3 North Square, Boston", website: "mammamaria.com", blurb: "Upscale Italian in a historic townhouse overlooking North Square, by the Paul Revere House." },
+  { name: "Bova's Bakery", category: "Bakery (24h)", nearStop: 13, lat: 42.3648, lng: -71.0560, address: "134 Salem St, Boston", website: "bovabakeryboston.net", blurb: "Family-run since 1926 and open around the clock — cannoli, cookies, and calzones any hour." },
+  { name: "Monument Restaurant & Tavern", category: "Tavern", nearStop: 15, lat: 42.3760, lng: -71.0610, address: "251 Main St, Charlestown", website: "monumentcharlestown.com", blurb: "Craft beer and comfort food in Charlestown, handy between the USS Constitution and Bunker Hill." },
+  { name: "Waverly Charlestown", category: "American", nearStop: 16, lat: 42.3770, lng: -71.0615, address: "231 Bunker Hill St, Charlestown", website: "waverlycharlestown.com", blurb: "Boston Magazine 'Best Brunch' pick near the Bunker Hill Monument — a fine reward at the Trail's end." }
+];
+
 // --- INDEXEDDB IMPLEMENTATION ---
 const DB_NAME = 'FreedomTrailDB';
 const DB_VERSION = 1;
@@ -438,6 +457,7 @@ const state = {
   currentTab: 'timeline-tab',
   activeDetailSiteId: null,
   closestSiteId: null,
+  selectedCanvasSiteId: null,
   watchId: null,
   mapConfig: {
     zoomScale: 1.0,
@@ -614,6 +634,76 @@ function updateTimelineDistances() {
     card.classList.toggle('nearby', !!isNearby);
     const badgeWrap = card.querySelector('.site-meta-badges');
     if (badgeWrap) badgeWrap.innerHTML = getBadgesHtml(site);
+  });
+}
+
+// --- TAVERNS & TREATS RENDERING ---
+function tavernCategoryIcon(category) {
+  const c = (category || '').toLowerCase();
+  if (c.includes('coffee')) return 'fa-mug-saucer';
+  if (c.includes('tavern')) return 'fa-beer-mug-empty';
+  if (c.includes('pastry') || c.includes('bakery')) return 'fa-cookie-bite';
+  if (c.includes('seafood')) return 'fa-fish';
+  if (c.includes('ice cream')) return 'fa-ice-cream';
+  if (c.includes('deli') || c.includes('sandwich')) return 'fa-bread-slice';
+  if (c.includes('italian')) return 'fa-wine-glass';
+  return 'fa-utensils';
+}
+
+function renderTaverns() {
+  const list = document.getElementById('taverns-list');
+  if (!list) return;
+
+  const hasLoc = state.userLocation.lat !== null && state.userLocation.lng !== null;
+  const items = TAVERNS_DATA.map((t) => ({
+    ...t,
+    dist: hasLoc ? getDistance(state.userLocation.lat, state.userLocation.lng, t.lat, t.lng) : null,
+  }));
+  // Nearest first when we have GPS; otherwise follow the trail order.
+  items.sort((a, b) => (a.dist !== null && b.dist !== null ? a.dist - b.dist : a.nearStop - b.nearStop));
+
+  list.innerHTML = '';
+  items.forEach((t) => {
+    const distStr = t.dist !== null ? formatDistance(t.dist) : '';
+    const query = encodeURIComponent(`${t.name} ${t.address}`);
+    const card = document.createElement('div');
+    card.className = 'tavern-card';
+    card.dataset.lat = t.lat;
+    card.dataset.lng = t.lng;
+    card.innerHTML = `
+      <div class="tavern-icon"><i class="fa-solid ${tavernCategoryIcon(t.category)}" aria-hidden="true"></i></div>
+      <div class="tavern-info">
+        <div class="tavern-title-row">
+          <h4>${escapeHtml(t.name)}</h4>
+          ${distStr ? `<span class="tavern-distance">${distStr}</span>` : ''}
+        </div>
+        <div class="tavern-meta"><span class="tavern-cat">${escapeHtml(t.category)}</span> &middot; near stop #${t.nearStop}</div>
+        <p class="tavern-blurb">${escapeHtml(t.blurb)}</p>
+        <div class="tavern-actions">
+          <a class="tavern-link" href="https://www.google.com/maps/search/?api=1&query=${query}" target="_blank" rel="noopener"><i class="fa-solid fa-diamond-turn-right" aria-hidden="true"></i> Directions</a>
+          ${t.website ? `<a class="tavern-link" href="https://${escapeHtml(t.website)}" target="_blank" rel="noopener"><i class="fa-solid fa-globe" aria-hidden="true"></i> Website</a>` : ''}
+        </div>
+      </div>
+    `;
+    list.appendChild(card);
+  });
+}
+
+// Update distance chips in place on GPS ticks (no re-sort, to avoid cards jumping).
+function updateTavernDistances() {
+  if (state.userLocation.lat === null || state.userLocation.lng === null) return;
+  document.querySelectorAll('#taverns-list .tavern-card').forEach((card) => {
+    const lat = parseFloat(card.dataset.lat);
+    const lng = parseFloat(card.dataset.lng);
+    const d = getDistance(state.userLocation.lat, state.userLocation.lng, lat, lng);
+    let chip = card.querySelector('.tavern-distance');
+    if (!chip) {
+      chip = document.createElement('span');
+      chip.className = 'tavern-distance';
+      const row = card.querySelector('.tavern-title-row');
+      if (row) row.appendChild(chip);
+    }
+    chip.textContent = formatDistance(d);
   });
 }
 
@@ -836,6 +926,7 @@ function toggleSiteCheckin(siteId) {
   saveVisitedState();
   renderTimeline();
   drawMap();
+  if (leaflet.map) refreshStopMarkers();
 }
 
 // Render Journal Timeline View
@@ -1303,23 +1394,189 @@ function calculateDistances() {
   // Update distances in place (no full rebuild) so the list keeps its scroll
   // position, and only redraw the map when it's the visible tab.
   updateTimelineDistances();
+  if (state.currentTab === 'taverns-tab') updateTavernDistances();
   if (state.currentTab === 'map-tab') drawMap();
+  updateLeafletUser();
 }
 
-// --- MAP CANVAS RENDER ENGINE ---
+// --- MAP VIEW CONTROLLER: Leaflet street map (online) with canvas diagram fallback (offline) ---
+const leaflet = {
+  map: null, tiles: null, trail: null, stopLayer: null, tavernLayer: null,
+  userMarker: null, stopMarkers: {}, tavernsVisible: false, initialized: false,
+};
+
+function cartoTileUrl() {
+  const isLight = !document.body.classList.contains('dark-mode');
+  return isLight
+    ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+    : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+}
+
+function canUseLeaflet() {
+  return navigator.onLine && typeof window.L !== 'undefined';
+}
+
+// Decide which map to show whenever the Map tab is opened or connectivity changes.
+function showMapView() {
+  const leafletEl = document.getElementById('leaflet-map');
+  const canvas = document.getElementById('map-canvas');
+  const controls = document.querySelector('.map-controls');
+  const caption = document.getElementById('map-caption');
+  const tavToggle = document.getElementById('toggle-taverns-btn');
+  if (!leafletEl || !canvas) return;
+
+  if (canUseLeaflet()) {
+    leafletEl.style.display = 'block';
+    canvas.style.display = 'none';
+    if (controls) controls.style.display = 'none';
+    if (caption) caption.classList.add('hidden');
+    if (tavToggle) tavToggle.style.display = '';
+    initLeafletMap();
+  } else {
+    leafletEl.style.display = 'none';
+    canvas.style.display = 'block';
+    if (controls) controls.style.display = '';
+    if (tavToggle) tavToggle.style.display = 'none';
+    setupMapCanvas();
+    recenterMap();
+  }
+}
+
+function stopDivIcon(site) {
+  const visited = state.visitedSites.has(site.id);
+  const closest = state.closestSiteId === site.id;
+  const mod = visited ? 'visited' : (closest ? 'closest' : '');
+  return L.divIcon({
+    html: `<div class="map-stop-marker ${mod}">${site.id}</div>`,
+    className: '', iconSize: [28, 28], iconAnchor: [14, 14],
+  });
+}
+
+function stopPopupHtml(site) {
+  const visited = state.visitedSites.has(site.id);
+  return `<div class="map-popup"><strong>#${site.id} ${escapeHtml(site.name)}</strong><br>` +
+    `<span class="mp-status">${visited ? '&#10003; Visited' : 'Not visited yet'}</span><br>` +
+    `<button class="mp-btn" data-checkin="${site.id}">${visited ? 'Mark unvisited' : 'Check in here'}</button></div>`;
+}
+
+function refreshStopMarkers() {
+  SITES_DATA.forEach((site) => {
+    const m = leaflet.stopMarkers[site.id];
+    if (m) { m.setIcon(stopDivIcon(site)); m.setPopupContent(stopPopupHtml(site)); }
+  });
+}
+
+function initLeafletMap() {
+  if (leaflet.initialized) {
+    refreshStopMarkers();
+    updateLeafletUser();
+    setTimeout(() => leaflet.map.invalidateSize(), 60);
+    return;
+  }
+  const map = L.map('leaflet-map', { zoomControl: false, attributionControl: true });
+  leaflet.map = map;
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+  leaflet.tiles = L.tileLayer(cartoTileUrl(), {
+    maxZoom: 19, subdomains: 'abcd',
+    attribution: '&copy; OpenStreetMap &copy; CARTO',
+  }).addTo(map);
+
+  // Trail line through the 16 stops
+  const latlngs = SITES_DATA.map((s) => [s.lat, s.lng]);
+  leaflet.trail = L.polyline(latlngs, { color: '#bd2f2f', weight: 4, opacity: 0.85, dashArray: '2 9', lineCap: 'round' }).addTo(map);
+
+  // Stop markers
+  leaflet.stopLayer = L.layerGroup().addTo(map);
+  SITES_DATA.forEach((site) => {
+    const m = L.marker([site.lat, site.lng], { icon: stopDivIcon(site) });
+    m.bindPopup(stopPopupHtml(site));
+    m.on('popupopen', () => {
+      const btn = document.querySelector(`.mp-btn[data-checkin="${site.id}"]`);
+      if (btn) btn.addEventListener('click', () => { toggleSiteCheckin(site.id); leaflet.map.closePopup(); });
+    });
+    leaflet.stopLayer.addLayer(m);
+    leaflet.stopMarkers[site.id] = m;
+  });
+
+  // Tavern markers (hidden until toggled on)
+  leaflet.tavernLayer = L.layerGroup();
+  TAVERNS_DATA.forEach((t) => {
+    const m = L.marker([t.lat, t.lng], { icon: L.divIcon({ html: '<div class="map-tavern-marker"><i class="fa-solid fa-mug-saucer"></i></div>', className: '', iconSize: [24, 24], iconAnchor: [12, 12] }) });
+    const q = encodeURIComponent(`${t.name} ${t.address}`);
+    m.bindPopup(`<div class="map-popup"><strong>${escapeHtml(t.name)}</strong><br><span class="mp-cat">${escapeHtml(t.category)}</span><br><a href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">Directions</a></div>`);
+    leaflet.tavernLayer.addLayer(m);
+  });
+
+  map.fitBounds(leaflet.trail.getBounds().pad(0.12));
+  updateLeafletUser();
+  leaflet.initialized = true;
+  setTimeout(() => map.invalidateSize(), 60);
+}
+
+function updateLeafletUser() {
+  if (!leaflet.map || state.userLocation.lat === null) return;
+  const ll = [state.userLocation.lat, state.userLocation.lng];
+  if (!leaflet.userMarker) {
+    leaflet.userMarker = L.circleMarker(ll, { radius: 7, color: '#fff', weight: 2, fillColor: '#3b82f6', fillOpacity: 1 }).addTo(leaflet.map);
+  } else {
+    leaflet.userMarker.setLatLng(ll);
+  }
+}
+
+function updateLeafletTheme() {
+  if (leaflet.map && leaflet.tiles) leaflet.tiles.setUrl(cartoTileUrl());
+}
+
+function toggleTaverns() {
+  const btn = document.getElementById('toggle-taverns-btn');
+  if (!leaflet.map) return;
+  leaflet.tavernsVisible = !leaflet.tavernsVisible;
+  if (leaflet.tavernsVisible) leaflet.tavernLayer.addTo(leaflet.map);
+  else leaflet.map.removeLayer(leaflet.tavernLayer);
+  if (btn) { btn.classList.toggle('active', leaflet.tavernsVisible); btn.setAttribute('aria-pressed', String(leaflet.tavernsVisible)); }
+}
+
+// --- MAP CANVAS RENDER ENGINE (offline fallback) ---
 function setupMapCanvas() {
   const canvas = document.getElementById('map-canvas');
   if (!canvas) return;
-  
+
   const resizeCanvas = () => {
     const rect = canvas.parentElement.getBoundingClientRect();
     canvas.width = rect.width;
     canvas.height = rect.height;
     drawMap();
   };
-  
+
+  // Wire listeners only once to avoid accumulating duplicates on repeat tab opens.
+  if (canvas.dataset.wired === '1') { resizeCanvas(); return; }
+  canvas.dataset.wired = '1';
+
   resizeCanvas();
   window.addEventListener('resize', resizeCanvas);
+
+  // Tap a node to reveal its name in the caption bar (fixes the old label pile-up).
+  canvas.addEventListener('click', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    const proj = getProjector(canvas.width, canvas.height);
+    const cw = canvas.width, ch = canvas.height, z = state.mapConfig.zoomScale;
+    let best = null, bestD = Infinity;
+    SITES_DATA.forEach((site) => {
+      const pt = proj.project(site.lat, site.lng);
+      const sx = (pt.x - cw / 2) * z + cw / 2 + state.mapConfig.panX;
+      const sy = (pt.y - ch / 2) * z + ch / 2 + state.mapConfig.panY;
+      const d = Math.hypot(sx - cx, sy - cy);
+      if (d < bestD) { bestD = d; best = site; }
+    });
+    if (best && bestD <= 18) {
+      state.selectedCanvasSiteId = best.id;
+      const cap = document.getElementById('map-caption');
+      if (cap) { cap.textContent = `#${best.id} · ${best.name}`; cap.classList.remove('hidden'); }
+      drawMap();
+    }
+  });
   
   // Drag / Pan Controls
   canvas.addEventListener('mousedown', (e) => {
@@ -1484,20 +1741,24 @@ function drawMap() {
     ctx.lineWidth = 2.5;
     ctx.fill();
     ctx.stroke();
-    
-    // Draw Node Label Text
-    ctx.font = `600 9px ${varName('--font-family-sans')}`;
-    ctx.fillStyle = labelColor;
-    ctx.fillText(`${site.id}`, pt.x - 3.5, pt.y + 3);
-    
-    // Label details (Show only for alternate nodes or on hover, but since simple canvas, render clean names nearby)
-    ctx.font = `500 8px ${varName('--font-family-sans')}`;
-    ctx.fillStyle = labelSubColor;
-    
-    // Position labels dynamically to avoid collision (alternate left/right)
-    const labelOffset = site.id % 2 === 0 ? 12 : -12;
-    ctx.textAlign = site.id % 2 === 0 ? 'left' : 'right';
-    ctx.fillText(site.name, pt.x + labelOffset, pt.y + 3);
+
+    // Highlight the tapped node with an outer ring (its name shows in the caption bar).
+    if (state.selectedCanvasSiteId === site.id) {
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, 13, 0, 2 * Math.PI);
+      ctx.strokeStyle = pathColor;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // Node number only — no always-on name labels (they used to collide badly in dense clusters).
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `700 9px ${varName('--font-family-sans')}`;
+    ctx.fillStyle = isVisited ? '#ffffff' : labelColor;
+    ctx.fillText(`${site.id}`, pt.x, pt.y);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
   });
   
   // 4. Draw User Location Dot
@@ -1583,7 +1844,7 @@ function varName(cssVar) {
 
 // Dynamic Map Pulsing loop for GPS pulse animation
 setInterval(() => {
-  if (state.currentTab === 'map-tab') {
+  if (state.currentTab === 'map-tab' && !canUseLeaflet()) {
     drawMap();
   }
 }, 300);
@@ -1623,9 +1884,10 @@ function switchTab(tabId) {
   // Perform tab-specific setup
   if (tabId === 'map-tab') {
     setTimeout(() => {
-      setupMapCanvas();
-      recenterMap();
-    }, 50);
+      showMapView();
+    }, 60);
+  } else if (tabId === 'taverns-tab') {
+    renderTaverns();
   } else if (tabId === 'journal-tab') {
     renderJournalTimeline();
   }
@@ -1671,8 +1933,9 @@ function setupThemeSwitcher() {
     document.body.classList.toggle('light-mode', goingLight);
     localStorage.setItem('freedom_theme', goingLight ? 'light' : 'dark');
     syncToggleUI();
-    // Re-draw map if open to update colors
+    // Re-draw map if open to update colors (canvas) or tiles (Leaflet).
     if (state.currentTab === 'map-tab') drawMap();
+    updateLeafletTheme();
   });
 }
 
@@ -1738,6 +2001,13 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   // Cloud share / backup UI
   setupShareUI();
+
+  // Map: taverns toggle + switch between street map / offline diagram on connectivity change
+  const tavBtn = document.getElementById('toggle-taverns-btn');
+  if (tavBtn) tavBtn.addEventListener('click', toggleTaverns);
+  const onConnectivityChange = () => { if (state.currentTab === 'map-tab') showMapView(); };
+  window.addEventListener('online', onConnectivityChange);
+  window.addEventListener('offline', onConnectivityChange);
   
   // Register Service Worker for PWA
   if ('serviceWorker' in navigator) {
