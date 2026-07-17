@@ -1156,6 +1156,70 @@ body.light-mode .canvas-wrapper {
   border: 1px solid var(--border-color);
 }
 
+.move-photo-btn {
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  background-color: rgba(59, 130, 246, 0.92);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  font-size: 0.58rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.move-photo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.move-photo-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  padding: 9px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  color: var(--text-primary);
+  font-family: var(--font-family-sans);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.move-photo-option:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.move-photo-option .mp-num {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-crimson);
+  color: #fff;
+  border-radius: 50%;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.mp-current {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
 .delete-photo-btn {
   position: absolute;
   top: -4px;
