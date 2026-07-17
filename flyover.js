@@ -190,10 +190,19 @@
             }).addTo(map);
           }
         });
-        map.fitBounds(L.latLngBounds(latlngs).pad(0.15));
-        setTimeout(() => {
-          if (map) map.invalidateSize();
-        }, 60);
+        // Give the map a valid view immediately so tiles load, then correct the
+        // size + framing after the overlay has painted. Running fitBounds BEFORE
+        // invalidateSize on a freshly-shown container leaves a blank/mis-framed map.
+        const bounds = L.latLngBounds(latlngs).pad(0.15);
+        map.setView(latlngs[0], 15);
+        const refit = () => {
+          if (!map) return;
+          map.invalidateSize();
+          map.fitBounds(bounds);
+        };
+        requestAnimationFrame(refit);
+        setTimeout(refit, 150);
+        setTimeout(refit, 400);
 
         const { cum, total } = measure(path);
         const miles = milestones(path, cum, stops);
