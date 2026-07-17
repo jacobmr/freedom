@@ -459,6 +459,7 @@ const state = {
   closestSiteId: null,
   selectedCanvasSiteId: null,
   watchId: null,
+  track: [], // recorded GPS breadcrumbs [{lat,lng,t}]
   mapConfig: {
     zoomScale: 1.0,
     panX: 0,
@@ -485,6 +486,78 @@ function loadState() {
 function saveVisitedState() {
   localStorage.setItem('freedom_visited_sites', JSON.stringify(Array.from(state.visitedSites)));
   updateProgressUI();
+}
+
+// --- GPS BREADCRUMB TRACK: record the real path walked, for the map + flyover (#8) ---
+const TRACK_KEY = 'freedom_track';
+
+function loadTrack() {
+  try {
+    const raw = localStorage.getItem(TRACK_KEY);
+    state.track = raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    state.track = [];
+  }
+}
+
+// Append a breadcrumb, throttled by distance + time so GPS jitter doesn't bloat it.
+function recordTrackPoint(lat, lng, acc) {
+  if (acc && acc > 60) return; // ignore very fuzzy fixes (big jumps pollute the path)
+  const track = state.track;
+  const last = track[track.length - 1];
+  const now = Date.now();
+  if (last) {
+    if (now - last.t < 4000) return; // >= 4s apart
+    if (getDistance(last.lat, last.lng, lat, lng) < 12) return; // >= 12m moved
+  }
+  if (track.length >= 5000) return; // hard cap
+  track.push({ lat: +lat.toFixed(5), lng: +lng.toFixed(5), t: now });
+  try { localStorage.setItem(TRACK_KEY, JSON.stringify(track)); } catch (e) { /* quota */ }
+  updateLeafletTrack();
+}
+
+function clearTrack() {
+  state.track = [];
+  try { localStorage.removeItem(TRACK_KEY); } catch (e) {}
+  if (leaflet.userTrack) { leaflet.map.removeLayer(leaflet.userTrack); leaflet.userTrack = null; }
+  if (state.currentTab === 'map-tab' && !canUseLeaflet()) drawMap();
+}
+
+// Thin a long track to at most `max` points for sharing (the flyover replays it).
+function downsampleTrack(track, max) {
+  if (!track || track.length <= max) return track || [];
+  const step = Math.ceil(track.length / max);
+  const out = [];
+  for (let i = 0; i < track.length; i += step) out.push(track[i]);
+  const lastPt = track[track.length - 1];
+  if (out[out.length - 1] !== lastPt) out.push(lastPt);
+  return out;
+}
+
+// Blue "your path" polyline on the Leaflet map.
+function updateLeafletTrack() {
+  if (!leaflet.map || !state.track.length) return;
+  const latlngs = state.track.map((p) => [p.lat, p.lng]);
+  if (!leaflet.userTrack) {
+    leaflet.userTrack = L.polyline(latlngs, { color: '#3b82f6', weight: 4, opacity: 0.75, lineCap: 'round', lineJoin: 'round' }).addTo(leaflet.map);
+  } else {
+    leaflet.userTrack.setLatLngs(latlngs);
+  }
+}
+
+// A "clear my recorded path" button in the map footer (local-only reset).
+function setupTrackControls() {
+  const footer = document.querySelector('.map-footer-actions');
+  if (!footer || document.getElementById('clear-track-btn')) return;
+  const btn = document.createElement('button');
+  btn.id = 'clear-track-btn';
+  btn.className = 'secondary-btn';
+  btn.innerHTML = '<i class="fa-solid fa-eraser" aria-hidden="true"></i> Clear my recorded path';
+  btn.addEventListener('click', () => {
+    if (state.track.length && !confirm("Clear the GPS path recorded on this walk? This only affects this device.")) return;
+    clearTrack();
+  });
+  footer.appendChild(btn);
 }
 
 // --- DISTANCE CALCULATION ---
@@ -1166,6 +1239,7 @@ async function buildSharePayload(onProgress) {
   }
 
   const visited = Array.from(state.visitedSites).map(Number);
+  const track = downsampleTrack(state.track, 800).map((p) => [p.lat, p.lng]);
   return {
     version: 1,
     title: 'My Freedom Trail Adventure',
@@ -1174,6 +1248,7 @@ async function buildSharePayload(onProgress) {
     visitedCount: visited.length,
     visited,
     entries,
+    track,
   };
 }
 
@@ -1262,6 +1337,12 @@ async function importSharedPayload(payload, id, token) {
     localStorage.setItem(SHARE_ID_KEY, id);
     localStorage.setItem(SHARE_TOKEN_KEY, token);
     localStorage.setItem(SHARE_SAVED_KEY, String(payload.savedAt || Date.now()));
+  }
+
+  if (Array.isArray(payload.track) && payload.track.length) {
+    state.track = payload.track.map((p) => (Array.isArray(p) ? { lat: p[0], lng: p[1], t: 0 } : p));
+    try { localStorage.setItem(TRACK_KEY, JSON.stringify(state.track)); } catch (e) {}
+    updateLeafletTrack();
   }
 
   renderTimeline();
@@ -1482,6 +1563,7 @@ function initGeolocation() {
       state.userLocation.lat = position.coords.latitude;
       state.userLocation.lng = position.coords.longitude;
       state.userLocation.accuracy = position.coords.accuracy;
+      recordTrackPoint(position.coords.latitude, position.coords.longitude, position.coords.accuracy);
       
       document.getElementById('map-gps-status').innerHTML = `<i class="fa-solid fa-circle-check" style="color: var(--status-visited)"></i> GPS Active`;
       document.getElementById('map-gps-status').classList.add('active');
@@ -1547,7 +1629,7 @@ function calculateDistances() {
 // --- MAP VIEW CONTROLLER: Leaflet street map (online) with canvas diagram fallback (offline) ---
 const leaflet = {
   map: null, tiles: null, trail: null, stopLayer: null, tavernLayer: null,
-  userMarker: null, stopMarkers: {}, tavernsVisible: false, initialized: false,
+  userMarker: null, userTrack: null, stopMarkers: {}, tavernsVisible: false, initialized: false,
 };
 
 function cartoTileUrl() {
@@ -1615,6 +1697,7 @@ function initLeafletMap() {
   if (leaflet.initialized) {
     refreshStopMarkers();
     updateLeafletUser();
+    updateLeafletTrack();
     setTimeout(() => leaflet.map.invalidateSize(), 60);
     return;
   }
@@ -1656,6 +1739,7 @@ function initLeafletMap() {
 
   map.fitBounds(leaflet.trail.getBounds().pad(0.12));
   updateLeafletUser();
+  updateLeafletTrack();
   leaflet.initialized = true;
   setTimeout(() => map.invalidateSize(), 60);
 }
@@ -1894,6 +1978,21 @@ function drawMap() {
     ctx.setLineDash([]);
   }
   
+  // 2b. Draw the user's recorded path (breadcrumbs) in blue.
+  if (state.track && state.track.length > 1) {
+    ctx.beginPath();
+    state.track.forEach((p, i) => {
+      const tp = proj.project(p.lat, p.lng);
+      if (i === 0) ctx.moveTo(tp.x, tp.y);
+      else ctx.lineTo(tp.x, tp.y);
+    });
+    ctx.strokeStyle = '#3b82f6';
+    ctx.lineWidth = 3;
+    ctx.globalAlpha = 0.75;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
   // 3. Draw site node circles & labels
   SITES_DATA.forEach(site => {
     const pt = proj.project(site.lat, site.lng);
@@ -2163,6 +2262,7 @@ function setupDrawerClose() {
 // --- BOOTSTRAP INITIALIZATION ---
 window.addEventListener('DOMContentLoaded', async () => {
   loadState();
+  loadTrack();
   updateProgressUI();
   renderTimeline();
   
@@ -2205,6 +2305,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   // First run: gently offer to save an email for a get-back link (skippable).
   if (!localStorage.getItem('freedom_onboarded')) setTimeout(maybeShowOnboarding, 900);
 
+  setupTrackControls();
   // Map: taverns toggle + switch between street map / offline diagram on connectivity change
   const tavBtn = document.getElementById('toggle-taverns-btn');
   if (tavBtn) tavBtn.addEventListener('click', toggleTaverns);
