@@ -1682,3 +1682,17 @@ body.light-mode .canvas-wrapper {
 .fo-summary-montage { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 18px; }
 .fo-summary-montage img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; }
 .fo-summary-actions { display: flex; gap: 10px; justify-content: center; }
+
+.map-bathroom-marker {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background-color: #2563eb;
+  color: #fff;
+  border: 2px solid #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+}
