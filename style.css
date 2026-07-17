@@ -1114,10 +1114,18 @@ body.light-mode .canvas-wrapper {
 }
 
 .autosave-indicator {
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  text-align: right;
-  height: 12px;
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  min-height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  transition: color 0.2s ease;
+}
+.autosave-indicator.saved {
+  color: var(--status-visited);
+  font-weight: 600;
 }
 
 /* Photo capture section inside details */
