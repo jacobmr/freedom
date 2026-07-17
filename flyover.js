@@ -141,6 +141,19 @@
         const fill = root.querySelector("#fo-fill");
         const lbl = root.querySelector("#fo-lbl");
 
+        const mapEl = document.getElementById("fo-map");
+
+        // On-screen diagnostic so a blank map can be pinned down remotely.
+        const dbg = document.createElement("div");
+        dbg.style.cssText =
+          "position:absolute;top:56px;left:8px;z-index:30;background:rgba(0,0,0,0.78);color:#7CFC00;font:11px/1.45 monospace;padding:6px 8px;border-radius:6px;max-width:92%;white-space:pre-wrap;pointer-events:none";
+        root.appendChild(dbg);
+        let tOk = 0,
+          tErr = 0;
+        const dbgUpd = () => {
+          dbg.textContent = `map ${mapEl ? mapEl.clientWidth + "x" + mapEl.clientHeight : "?"} | pts ${path.length} | tiles ok:${tOk} err:${tErr}`;
+        };
+
         map = L.map("fo-map", {
           zoomControl: false,
           attributionControl: true,
@@ -152,11 +165,20 @@
           touchZoom: false,
           tap: false,
         });
-        L.tileLayer(tileUrl(), {
+        const tiles = L.tileLayer(tileUrl(), {
           maxZoom: 19,
           subdomains: "abcd",
           attribution: "&copy; OSM &copy; CARTO",
-        }).addTo(map);
+        });
+        tiles.on("tileload", () => {
+          tOk++;
+          dbgUpd();
+        });
+        tiles.on("tileerror", () => {
+          tErr++;
+          dbgUpd();
+        });
+        tiles.addTo(map);
 
         const latlngs = path.map((p) => [p[0], p[1]]);
         L.polyline(latlngs, {
@@ -190,19 +212,23 @@
             }).addTo(map);
           }
         });
-        // Give the map a valid view immediately so tiles load, then correct the
-        // size + framing after the overlay has painted. Running fitBounds BEFORE
-        // invalidateSize on a freshly-shown container leaves a blank/mis-framed map.
+
+        // Size the map to its container, THEN frame the route — retried across a
+        // few ticks in case the container isn't measured on the first pass.
         const bounds = L.latLngBounds(latlngs).pad(0.15);
-        map.setView(latlngs[0], 15);
-        const refit = () => {
+        const draw = () => {
           if (!map) return;
           map.invalidateSize();
           map.fitBounds(bounds);
+          dbgUpd();
         };
-        requestAnimationFrame(refit);
-        setTimeout(refit, 150);
-        setTimeout(refit, 400);
+        map.setView(latlngs[0], 14); // initial view so tiles start loading immediately
+        map.whenReady(draw);
+        requestAnimationFrame(draw);
+        setTimeout(draw, 200);
+        setTimeout(draw, 700);
+        setTimeout(draw, 1500);
+        dbgUpd();
 
         const { cum, total } = measure(path);
         const miles = milestones(path, cum, stops);
