@@ -774,14 +774,22 @@ async function openDetailsDrawer(siteId) {
         <label class="camera-input-wrapper" id="camera-btn-wrapper">
           <i class="fa-solid fa-camera"></i>
           <span>Add Photo</span>
-          <input type="file" id="camera-file-input" accept="image/*" capture="environment">
+          <input type="file" id="camera-file-input" accept="image/*">
         </label>
       </div>
     </div>
   `;
   
   // Bind Check-in Button
-  document.getElementById('detail-checkin-btn').addEventListener('click', () => {
+  document.getElementById('detail-checkin-btn').addEventListener('click', async () => {
+    // Flush any in-flight journal draft first: the re-render below reloads the
+    // textarea from the DB, so an unsaved draft (within the 800ms debounce)
+    // would otherwise be lost when you check in.
+    const ta = document.getElementById('drawer-journal-textarea');
+    if (ta) {
+      clearTimeout(saveTimeout);
+      try { await saveJournal(siteId, ta.value); } catch (e) { /* keep going */ }
+    }
     toggleSiteCheckin(siteId);
     openDetailsDrawer(siteId); // Refresh drawer content
   });
@@ -906,9 +914,8 @@ function openLightbox(imgUrl) {
     lightbox.querySelector('.lightbox-close').addEventListener('click', () => {
       lightbox.classList.remove('active');
     });
-    lightbox.addEventListener('click', (e) => {
-      if (e.target === lightbox) lightbox.classList.remove('active');
-    });
+    // Tap anywhere — backdrop or the photo itself — to dismiss.
+    lightbox.addEventListener('click', () => lightbox.classList.remove('active'));
   }
   
   lightbox.querySelector('.lightbox-img').src = imgUrl;
@@ -1353,7 +1360,9 @@ function initGeolocation() {
       console.error("GPS Watch error", error);
       document.getElementById('map-gps-status').innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color: var(--status-nearby)"></i> GPS Offline`;
     },
-    { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+    // High accuracy is required for the 50m proximity checks, but at a walking pace a
+    // fix every ~10s (vs 5s) is plenty and roughly halves GPS battery use.
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
   );
 }
 
@@ -1376,8 +1385,12 @@ function calculateDistances() {
   state.closestSiteId = closestSite ? closestSite.id : null;
   
   // Check if closest site is within 50m (Proximity checklist activation)
+  // Skip the auto-prompt when the GPS fix is too fuzzy to trust: downtown stops sit
+  // ~10-15m apart, so a >100m-accuracy reading can't tell them apart and would prompt
+  // the wrong one. ponytail: 100m ceiling is a heuristic — tune if prompts misfire.
+  const acc = state.userLocation.accuracy;
   const proximityBanner = document.getElementById('proximity-banner');
-  if (closestSite && minDistance <= 50 && !state.visitedSites.has(closestSite.id)) {
+  if (closestSite && minDistance <= 50 && (!acc || acc <= 100) && !state.visitedSites.has(closestSite.id)) {
     document.getElementById('proximity-site-name').textContent = closestSite.name;
     proximityBanner.classList.remove('hidden');
     
@@ -1614,7 +1627,35 @@ function setupMapCanvas() {
 
   canvas.addEventListener('touchend', () => {
     state.mapConfig.isDragging = false;
+    pinchStartDist = 0;
   });
+
+  // Scroll / trackpad wheel zoom (the footer hint promises "scroll to zoom").
+  const clampZoom = (z) => Math.max(0.5, Math.min(8, z));
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    state.mapConfig.zoomScale = clampZoom(state.mapConfig.zoomScale * factor);
+    drawMap();
+  }, { passive: false });
+
+  // Two-finger pinch zoom (the footer hint promises "pinch to zoom").
+  let pinchStartDist = 0;
+  let pinchStartZoom = 1;
+  const pinchDist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  canvas.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) {
+      pinchStartDist = pinchDist(e.touches);
+      pinchStartZoom = state.mapConfig.zoomScale;
+      state.mapConfig.isDragging = false; // don't also pan mid-pinch
+    }
+  });
+  canvas.addEventListener('touchmove', (e) => {
+    if (e.touches.length !== 2 || !pinchStartDist) return;
+    e.preventDefault();
+    state.mapConfig.zoomScale = clampZoom(pinchStartZoom * (pinchDist(e.touches) / pinchStartDist));
+    drawMap();
+  }, { passive: false });
   
   // Control Bindings
   document.getElementById('map-zoom-in').addEventListener('click', () => {
@@ -2008,6 +2049,21 @@ window.addEventListener('DOMContentLoaded', async () => {
   const onConnectivityChange = () => { if (state.currentTab === 'map-tab') showMapView(); };
   window.addEventListener('online', onConnectivityChange);
   window.addEventListener('offline', onConnectivityChange);
+
+  // Escape closes the topmost open overlay (lightbox > share modal > drawer).
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const lightbox = document.getElementById('app-lightbox');
+    if (lightbox && lightbox.classList.contains('active')) { lightbox.classList.remove('active'); return; }
+    const shareModal = document.getElementById('share-modal');
+    if (shareModal && !shareModal.classList.contains('hidden')) { shareModal.classList.add('hidden'); return; }
+    const drawer = document.getElementById('details-drawer');
+    if (drawer && !drawer.classList.contains('hidden')) {
+      drawer.classList.add('hidden');
+      state.activeDetailSiteId = null;
+      revokeUrls(drawerPhotoUrls);
+    }
+  });
   
   // Register Service Worker for PWA
   if ('serviceWorker' in navigator) {

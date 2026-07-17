@@ -5,7 +5,7 @@
 // Why octet-stream: the Vercel Node runtime reliably exposes an octet-stream body as
 // a Buffer on req.body, whereas an image/* body can be consumed before the handler runs.
 import { put } from '@vercel/blob';
-import { makeId } from '../lib/db.js';
+import { makeId, ensureSchema, checkRateLimit, clientIp } from '../lib/db.js';
 
 const ALLOWED = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 const MAX_BYTES = 6 * 1024 * 1024; // compressed photos are far smaller; generous ceiling
@@ -23,6 +23,10 @@ export default async function handler(req, res) {
     if (req.method !== 'POST') {
       res.setHeader('Allow', 'POST');
       return res.status(405).json({ error: 'method not allowed' });
+    }
+    await ensureSchema(); // creates the rate_limits table if needed
+    if (!(await checkRateLimit(`upload:${clientIp(req)}`, 150))) {
+      return res.status(429).json({ error: 'rate limited' });
     }
     const photoType = (req.headers['x-photo-type'] || req.headers['content-type'] || '').split(';')[0].trim();
     const ext = ALLOWED[photoType];

@@ -3,7 +3,7 @@
 //   GET    /api/share?id=ID      -> read (public)                   => { id, payload, updatedAt }
 //   PUT    /api/share?id=ID      -> update (x-edit-token header)    => { id, ok }
 //   DELETE /api/share?id=ID      -> delete (x-edit-token header)    => { id, deleted }
-import { db, ensureSchema, makeId, makeToken, hashToken, verifyToken } from '../lib/db.js';
+import { db, ensureSchema, makeId, makeToken, hashToken, verifyToken, checkRateLimit, clientIp } from '../lib/db.js';
 import { del } from '@vercel/blob';
 
 const MAX_PAYLOAD_BYTES = 1_000_000; // journal text + photo URLs only (images live in Blob)
@@ -57,6 +57,9 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
+      if (!(await checkRateLimit(`share:${clientIp(req)}`, 30))) {
+        return res.status(429).json({ error: 'rate limited' });
+      }
       const v = validPayloadStr(getBody(req));
       if (!v) return res.status(400).json({ error: 'invalid payload' });
       if (v.tooLarge) return res.status(413).json({ error: 'payload too large' });
