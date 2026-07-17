@@ -1125,7 +1125,7 @@ async function createNewShare(payload) {
   const res = await fetch('/api/share', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ payload }),
+    body: JSON.stringify({ payload, email: localStorage.getItem('freedom_email') || undefined }),
   });
   if (!res.ok) throw new Error('Could not create cloud copy');
   const data = await res.json();
@@ -1144,7 +1144,7 @@ async function saveToCloud(onProgress) {
     const res = await fetch(`/api/share?id=${encodeURIComponent(existingId)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'x-edit-token': token },
-      body: JSON.stringify({ payload }),
+      body: JSON.stringify({ payload, email: localStorage.getItem('freedom_email') || undefined }),
     });
     if (res.status === 404 || res.status === 403) {
       // Stale/invalid local reference — start a fresh cloud copy.
@@ -1251,6 +1251,82 @@ function renderShareStatus() {
     document.getElementById('save-cloud-btn').innerHTML = `<i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i> Save to cloud`;
   }
 }
+
+// First-run modal: optionally capture an email for a magic "get back" link.
+function maybeShowOnboarding() {
+  if (localStorage.getItem('freedom_onboarded')) return;
+  let modal = document.getElementById('onboarding-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'onboarding-modal';
+    modal.className = 'drawer-overlay';
+    modal.innerHTML = `
+      <div class="share-modal-content">
+        <div class="share-modal-header">
+          <h3><i class="fa-solid fa-envelope" aria-hidden="true"></i> Save your progress</h3>
+          <button class="close-btn" id="onboard-skip-x" aria-label="Skip"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+        </div>
+        <div class="share-modal-body">
+          <p class="share-intro">Add your email and we'll send you a private link to get back to your adventure on any device. Totally optional — you can walk the Trail without it.</p>
+          <div class="copy-row">
+            <input id="onboard-email" class="share-input" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com">
+          </div>
+          <div id="onboard-msg" class="share-hint"></div>
+          <button id="onboard-save" class="primary-btn"><i class="fa-solid fa-check" aria-hidden="true"></i> Save my email</button>
+          <button id="onboard-skip" class="secondary-btn sm-btn share-full">Maybe later</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    const done = () => { localStorage.setItem('freedom_onboarded', '1'); modal.classList.add('hidden'); };
+    document.getElementById('onboard-skip').addEventListener('click', done);
+    document.getElementById('onboard-skip-x').addEventListener('click', done);
+    modal.addEventListener('click', (e) => { if (e.target === modal) done(); });
+    document.getElementById('onboard-save').addEventListener('click', () => {
+      const email = (document.getElementById('onboard-email').value || '').trim().toLowerCase();
+      const msg = document.getElementById('onboard-msg');
+      if (!EMAIL_RE.test(email)) { msg.textContent = 'Please enter a valid email.'; msg.style.color = 'var(--accent-crimson)'; return; }
+      localStorage.setItem('freedom_email', email);
+      done();
+    });
+  }
+  modal.classList.remove('hidden');
+}
+
+// Adds an "email me a link to get back" control to the bottom of the share modal.
+function addGetBackSection() {
+  const body = document.querySelector('#share-modal .share-modal-body');
+  if (!body || document.getElementById('getback-email')) return;
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <hr class="share-divider">
+    <label class="share-label">Get back to your adventure</label>
+    <p class="share-hint">We'll email you a private link to return to this adventure — and keep editing it — on any device.</p>
+    <div class="copy-row">
+      <input id="getback-email" class="share-input" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com">
+      <button id="getback-btn" class="secondary-btn sm-btn">Email me</button>
+    </div>
+    <div id="getback-msg" class="share-hint"></div>`;
+  body.appendChild(div);
+  const emailInput = document.getElementById('getback-email');
+  emailInput.value = localStorage.getItem('freedom_email') || '';
+  document.getElementById('getback-btn').addEventListener('click', async () => {
+    const email = (emailInput.value || '').trim().toLowerCase();
+    const msg = document.getElementById('getback-msg');
+    if (!EMAIL_RE.test(email)) { msg.textContent = 'Please enter a valid email.'; msg.style.color = 'var(--accent-crimson)'; return; }
+    localStorage.setItem('freedom_email', email);
+    msg.textContent = 'Saving your adventure & sending the link…'; msg.style.color = 'var(--text-muted)';
+    try {
+      await saveToCloud();               // ensure a cloud copy exists and is tied to this email
+      const res = await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
+      if (!res.ok) throw new Error('failed');
+      msg.textContent = 'Check your inbox for your get-back link.'; msg.style.color = 'var(--status-visited)';
+    } catch (e) {
+      msg.textContent = 'Could not send right now — please try again.'; msg.style.color = 'var(--accent-crimson)';
+    }
+  });
+}
+
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 function setupShareUI() {
   const modal = document.getElementById('share-modal');
@@ -2029,6 +2105,20 @@ window.addEventListener('DOMContentLoaded', async () => {
     console.error("IndexedDB failed", e);
   }
   
+  // Magic-link resume: /?resume=TOKEN restores this device's adventure + edit access.
+  const _resumeToken = new URLSearchParams(location.search).get('resume');
+  if (_resumeToken) {
+    try {
+      const rres = await fetch(`/api/auth?token=${encodeURIComponent(_resumeToken)}`);
+      if (rres.ok) {
+        const rdata = await rres.json();
+        await importSharedPayload(rdata.payload, rdata.id, rdata.editToken);
+        localStorage.setItem('freedom_onboarded', '1');
+      }
+    } catch (e) { console.warn('resume failed', e); }
+    history.replaceState(null, '', location.pathname); // strip token from the URL
+  }
+
   // Bind UI modules
   setupTabRouting();
   setupThemeSwitcher();
@@ -2042,6 +2132,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   // Cloud share / backup UI
   setupShareUI();
+  addGetBackSection();
+  // First run: gently offer to save an email for a get-back link (skippable).
+  if (!localStorage.getItem('freedom_onboarded')) setTimeout(maybeShowOnboarding, 900);
 
   // Map: taverns toggle + switch between street map / offline diagram on connectivity change
   const tavBtn = document.getElementById('toggle-taverns-btn');
