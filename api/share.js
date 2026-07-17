@@ -3,7 +3,7 @@
 //   GET    /api/share?id=ID      -> read (public)                   => { id, payload, updatedAt }
 //   PUT    /api/share?id=ID      -> update (x-edit-token header)    => { id, ok }
 //   DELETE /api/share?id=ID      -> delete (x-edit-token header)    => { id, deleted }
-import { db, ensureSchema, makeId, makeToken, hashToken, verifyToken, checkRateLimit, clientIp } from '../lib/db.js';
+import { db, ensureSchema, makeId, makeToken, hashToken, verifyToken, checkRateLimit, clientIp, upsertAccount, normalizeEmail } from '../lib/db.js';
 import { del } from '@vercel/blob';
 
 const MAX_PAYLOAD_BYTES = 1_000_000; // journal text + photo URLs only (images live in Blob)
@@ -60,7 +60,8 @@ export default async function handler(req, res) {
       if (!(await checkRateLimit(`share:${clientIp(req)}`, 30))) {
         return res.status(429).json({ error: 'rate limited' });
       }
-      const v = validPayloadStr(getBody(req));
+      const body = getBody(req);
+      const v = validPayloadStr(body);
       if (!v) return res.status(400).json({ error: 'invalid payload' });
       if (v.tooLarge) return res.status(413).json({ error: 'payload too large' });
       const newId = makeId();
@@ -70,18 +71,21 @@ export default async function handler(req, res) {
         sql: 'INSERT INTO shares (id, edit_token_hash, payload, created_at, updated_at) VALUES (?,?,?,?,?)',
         args: [newId, hashToken(token), v.str, now, now],
       });
+      if (body && normalizeEmail(body.email)) await upsertAccount(body.email, newId);
       return res.status(201).json({ id: newId, editToken: token });
     }
 
     if (req.method === 'PUT') {
       if (!id) return res.status(400).json({ error: 'missing id' });
-      const v = validPayloadStr(getBody(req));
+      const body = getBody(req);
+      const v = validPayloadStr(body);
       if (!v) return res.status(400).json({ error: 'invalid payload' });
       if (v.tooLarge) return res.status(413).json({ error: 'payload too large' });
       const r = await db().execute({ sql: 'SELECT edit_token_hash FROM shares WHERE id = ?', args: [id] });
       if (!r.rows.length) return res.status(404).json({ error: 'not found' });
       if (!verifyToken(req.headers['x-edit-token'], r.rows[0].edit_token_hash)) return res.status(403).json({ error: 'forbidden' });
       await db().execute({ sql: 'UPDATE shares SET payload = ?, updated_at = ? WHERE id = ?', args: [v.str, Date.now(), id] });
+      if (body && normalizeEmail(body.email)) await upsertAccount(body.email, id);
       return res.status(200).json({ id, ok: true });
     }
 
