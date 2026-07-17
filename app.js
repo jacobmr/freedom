@@ -875,6 +875,7 @@ async function renderDrawerPhotos(siteId) {
     container.className = 'photo-item-container';
     container.innerHTML = `
       <img src="${url}" class="photo-item-img" alt="Trail photo">
+      <button class="move-photo-btn" data-photo-id="${p.id}" title="Move to another stop" aria-label="Move photo to another stop"><i class="fa-solid fa-right-left"></i></button>
       <button class="delete-photo-btn" data-photo-id="${p.id}"><i class="fa-solid fa-trash"></i></button>
     `;
     
@@ -892,10 +893,63 @@ async function renderDrawerPhotos(siteId) {
         if (state.currentTab === 'journal-tab') renderJournalTimeline();
       }
     });
+
+    // Move this photo to a different stop (e.g. a shot filed under the wrong site).
+    container.querySelector('.move-photo-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      openMovePhotoPicker(p, siteId);
+    });
     
     // Insert before camera button
     grid.insertBefore(container, cameraBtnWrapper);
   });
+}
+
+// Pick a different stop for a photo and re-file it there (updates its siteId).
+function openMovePhotoPicker(photo, currentSiteId) {
+  let modal = document.getElementById('move-photo-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'move-photo-modal';
+    modal.className = 'drawer-overlay hidden';
+    modal.innerHTML = `
+      <div class="share-modal-content">
+        <div class="share-modal-header">
+          <h3><i class="fa-solid fa-right-left" aria-hidden="true"></i> Move photo to…</h3>
+          <button class="close-btn" id="move-photo-close" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+        </div>
+        <div class="share-modal-body">
+          <p class="share-hint">Pick the stop this photo belongs to.</p>
+          <div id="move-photo-list" class="move-photo-list"></div>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.querySelector('#move-photo-close').addEventListener('click', () => modal.classList.add('hidden'));
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
+  }
+
+  const list = modal.querySelector('#move-photo-list');
+  list.innerHTML = '';
+  SITES_DATA.forEach((s) => {
+    const isCurrent = s.id === currentSiteId;
+    const btn = document.createElement('button');
+    btn.className = 'move-photo-option';
+    btn.disabled = isCurrent;
+    btn.innerHTML = `<span class="mp-num">${s.id}</span> ${escapeHtml(s.name)}${isCurrent ? ' <span class="mp-current">(current)</span>' : ''}`;
+    if (!isCurrent) {
+      btn.addEventListener('click', async () => {
+        try {
+          await updatePhotoRecord({ ...photo, siteId: s.id });
+        } catch (err) { console.error('Move photo failed', err); }
+        modal.classList.add('hidden');
+        renderDrawerPhotos(currentSiteId); // photo leaves this stop's grid
+        if (state.currentTab === 'journal-tab') renderJournalTimeline();
+      });
+    }
+    list.appendChild(btn);
+  });
+
+  modal.classList.remove('hidden');
 }
 
 // Lightbox utility
