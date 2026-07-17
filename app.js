@@ -1465,6 +1465,91 @@ function addGetBackSection() {
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
+// --- FLYOVER RECAP (owner) + GPX/track import (#9) ---
+async function playOwnerFlyover() {
+  if (!window.Flyover) { alert('The recap needs an internet connection.'); return; }
+  const journals = await getAllJournals();
+  const photos = await getAllPhotos();
+  const urls = [];
+  const stops = SITES_DATA.map((s) => {
+    const j = journals.find((x) => x.siteId === s.id);
+    const sp = photos.filter((p) => p.siteId === s.id).map((p) => {
+      const u = URL.createObjectURL(p.blob); urls.push(u); return u;
+    });
+    return { id: s.id, name: s.name, lat: s.lat, lng: s.lng, visited: state.visitedSites.has(s.id), text: j ? j.entryText : '', photos: sp };
+  });
+  const path = (state.track && state.track.length > 1)
+    ? state.track.map((p) => [p.lat, p.lng])
+    : (typeof TRAIL_ROUTE !== 'undefined' ? TRAIL_ROUTE : SITES_DATA.map((s) => [s.lat, s.lng]));
+  Flyover.play({
+    title: 'My Freedom Trail Recap',
+    path, stops,
+    meta: { visited: state.visitedSites.size, total: SITES_DATA.length },
+    onClose: () => urls.forEach((u) => URL.revokeObjectURL(u)),
+  });
+}
+
+// Parse a GPX or GeoJSON export into [{lat,lng,t}] (e.g. a Strava/Garmin track).
+function parseTrackFile(text) {
+  const pts = [];
+  if (/^\s*</.test(text)) {
+    const re = /<(?:trkpt|rtept|wpt)\b[^>]*\blat="([-\d.]+)"[^>]*\blon="([-\d.]+)"/gi;
+    let m; while ((m = re.exec(text))) pts.push({ lat: +m[1], lng: +m[2], t: 0 });
+  } else {
+    try {
+      const j = JSON.parse(text);
+      const findLine = (o) => {
+        if (!o || typeof o !== 'object') return null;
+        if (o.type === 'LineString' && Array.isArray(o.coordinates)) return o.coordinates;
+        if (o.type === 'MultiLineString' && Array.isArray(o.coordinates)) return o.coordinates.flat();
+        if (o.type === 'Feature') return findLine(o.geometry);
+        if (Array.isArray(o.features)) { for (const f of o.features) { const r = findLine(f); if (r) return r; } }
+        if (Array.isArray(o.geometries)) { for (const g of o.geometries) { const r = findLine(g); if (r) return r; } }
+        return null;
+      };
+      const coords = findLine(j);
+      if (coords) coords.forEach((c) => { if (Array.isArray(c) && c.length >= 2) pts.push({ lat: +c[1], lng: +c[0], t: 0 }); });
+    } catch (e) { /* not geojson */ }
+  }
+  return pts.filter((p) => isFinite(p.lat) && isFinite(p.lng));
+}
+
+function importTrackFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const pts = parseTrackFile(String(reader.result));
+    if (pts.length < 2) { alert('Could not read a path from that file. Export a GPX or GeoJSON track (e.g. from Strava).'); return; }
+    const step = Math.max(1, Math.ceil(pts.length / 3000)); // storage sanity for big exports
+    state.track = pts.filter((_, i) => i % step === 0 || i === pts.length - 1)
+      .map((p) => ({ lat: +p.lat.toFixed(5), lng: +p.lng.toFixed(5), t: 0 }));
+    try { localStorage.setItem(TRACK_KEY, JSON.stringify(state.track)); } catch (e) {}
+    updateLeafletTrack();
+    if (state.currentTab === 'map-tab' && !canUseLeaflet()) drawMap();
+    alert(`Imported ${state.track.length} points \u2014 your walked path is now on the map and in the recap.`);
+  };
+  reader.readAsText(file);
+}
+
+// Inject the Recap button (Journal) + Import-path control (map footer).
+function setupFlyoverUI() {
+  const jActions = document.querySelector('.journal-actions');
+  if (jActions && !document.getElementById('recap-btn')) {
+    const b = document.createElement('button');
+    b.id = 'recap-btn'; b.className = 'primary-btn sm-btn';
+    b.innerHTML = '<i class="fa-solid fa-play" aria-hidden="true"></i> Recap';
+    b.addEventListener('click', playOwnerFlyover);
+    jActions.insertBefore(b, jActions.firstChild);
+  }
+  const footer = document.querySelector('.map-footer-actions');
+  if (footer && !document.getElementById('import-track-label')) {
+    const label = document.createElement('label');
+    label.id = 'import-track-label'; label.className = 'secondary-btn'; label.style.cursor = 'pointer';
+    label.innerHTML = '<i class="fa-solid fa-file-arrow-up" aria-hidden="true"></i> Import path (GPX) <input type="file" accept=".gpx,.geojson,.json,application/gpx+xml" id="import-track-input" style="display:none">';
+    footer.appendChild(label);
+    label.querySelector('#import-track-input').addEventListener('change', (e) => { if (e.target.files[0]) importTrackFile(e.target.files[0]); e.target.value=''; });
+  }
+}
+
 function setupShareUI() {
   const modal = document.getElementById('share-modal');
   const openBtn = document.getElementById('share-journal-btn');
@@ -2306,6 +2391,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (!localStorage.getItem('freedom_onboarded')) setTimeout(maybeShowOnboarding, 900);
 
   setupTrackControls();
+  setupFlyoverUI();
   // Map: taverns toggle + switch between street map / offline diagram on connectivity change
   const tavBtn = document.getElementById('toggle-taverns-btn');
   if (tavBtn) tavBtn.addEventListener('click', toggleTaverns);
