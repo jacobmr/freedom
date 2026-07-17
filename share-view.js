@@ -31,6 +31,40 @@
     16: "Bunker Hill Monument",
   };
 
+  // Stop coordinates (the share payload carries content, not geometry) so the
+  // flyover can position each stop and its milestone along the path.
+  const SITE_COORDS = {
+    1: [42.3551, -71.0657], 2: [42.3582, -71.0637], 3: [42.3569, -71.062], 4: [42.3575, -71.0617],
+    5: [42.3569, -71.0607], 6: [42.3582, -71.0593], 7: [42.3571, -71.0583], 8: [42.3569, -71.0586],
+    9: [42.3587, -71.0575], 10: [42.3585, -71.0574], 11: [42.36, -71.0561], 12: [42.3638, -71.0537],
+    13: [42.3665, -71.0545], 14: [42.3675, -71.0563], 15: [42.3725, -71.0566], 16: [42.3763, -71.0603],
+  };
+
+  function playSharedFlyover(payload) {
+    if (!window.Flyover) return;
+    const entries = payload.entries || {};
+    const visitedSet = new Set((payload.visited || []).map(Number));
+    const orderedIds = Object.keys(SITE_COORDS).map(Number).sort((a, b) => a - b);
+    const stops = orderedIds.map((id) => {
+      const e = entries[id] || {};
+      return {
+        id, name: e.name || SITE_NAMES[id] || ("Site " + id),
+        lat: SITE_COORDS[id][0], lng: SITE_COORDS[id][1],
+        visited: visitedSet.has(id),
+        text: e.text || "",
+        photos: Array.isArray(e.photos) ? e.photos : [],
+      };
+    });
+    const track = Array.isArray(payload.track) && payload.track.length > 1 ? payload.track : null;
+    const path = track || (typeof TRAIL_ROUTE !== "undefined" ? TRAIL_ROUTE : orderedIds.map((id) => SITE_COORDS[id]));
+    window.Flyover.play({
+      title: payload.title || "A Freedom Trail Adventure",
+      path, stops,
+      meta: { visited: payload.visitedCount != null ? payload.visitedCount : visitedSet.size, total: payload.totalSites || 16 },
+    });
+  }
+
+
   // Extract the share id from /s/:id (rewrite) or a ?id= fallback.
   function getShareId() {
     const m = location.pathname.match(/\/s\/([^/?#]+)/);
@@ -155,6 +189,16 @@
     show("share-loading", "none");
     show("share-timeline", "flex");
     show("share-cta", "block");
+
+    if (window.Flyover) {
+      const cta = document.getElementById("share-recap-cta");
+      const btn = document.getElementById("share-recap-btn");
+      if (cta) cta.style.display = "block";
+      if (btn && !btn.dataset.wired) {
+        btn.dataset.wired = "1";
+        btn.addEventListener("click", () => playSharedFlyover(payload));
+      }
+    }
   }
 
   async function load() {
