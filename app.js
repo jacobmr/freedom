@@ -269,6 +269,17 @@ const TAVERNS_DATA = [
   { name: "Waverly Charlestown", category: "American", nearStop: 16, lat: 42.3770, lng: -71.0615, address: "231 Bunker Hill St, Charlestown", website: "waverlycharlestown.com", blurb: "Boston Magazine 'Best Brunch' pick near the Bunker Hill Monument — a fine reward at the Trail's end." }
 ];
 
+// --- RESTROOMS: public bathrooms along the trail (toggleable map layer, #10) ---
+// Approximate coordinates (good enough for a marker + Directions link).
+const BATHROOMS_DATA = [
+  { name: "Boston Common Visitor Center", nearStop: 1, lat: 42.3554, lng: -71.0641, address: "139 Tremont St, Boston", note: "Public restrooms at the visitor center." },
+  { name: "Massachusetts State House", nearStop: 2, lat: 42.3588, lng: -71.0637, address: "24 Beacon St, Boston", note: "Restrooms inside during open hours (weekdays)." },
+  { name: "Boston Public Market", nearStop: 11, lat: 42.3617, lng: -71.0576, address: "100 Hanover St, Boston", note: "Restrooms inside, open daily - handy at Haymarket before the North End." },
+  { name: "Faneuil Hall / Quincy Market", nearStop: 11, lat: 42.3599, lng: -71.0553, address: "4 S Market St, Boston", note: "Public restrooms in Quincy Market." },
+  { name: "USS Constitution Museum", nearStop: 15, lat: 42.3733, lng: -71.0555, address: "Building 22, Charlestown Navy Yard", note: "Restrooms at the museum (free)." },
+  { name: "Bunker Hill Museum", nearStop: 16, lat: 42.3759, lng: -71.0611, address: "43 Monument Sq, Charlestown", note: "Restrooms in the museum, across from the monument." }
+];
+
 // --- INDEXEDDB IMPLEMENTATION ---
 const DB_NAME = 'FreedomTrailDB';
 const DB_VERSION = 1;
@@ -1713,8 +1724,8 @@ function calculateDistances() {
 
 // --- MAP VIEW CONTROLLER: Leaflet street map (online) with canvas diagram fallback (offline) ---
 const leaflet = {
-  map: null, tiles: null, trail: null, stopLayer: null, tavernLayer: null,
-  userMarker: null, userTrack: null, stopMarkers: {}, tavernsVisible: false, initialized: false,
+  map: null, tiles: null, trail: null, stopLayer: null, tavernLayer: null, bathroomLayer: null,
+  userMarker: null, userTrack: null, stopMarkers: {}, tavernsVisible: false, bathroomsVisible: false, initialized: false,
 };
 
 function cartoTileUrl() {
@@ -1735,6 +1746,7 @@ function showMapView() {
   const controls = document.querySelector('.map-controls');
   const caption = document.getElementById('map-caption');
   const tavToggle = document.getElementById('toggle-taverns-btn');
+  const bathToggle = document.getElementById('toggle-bathrooms-btn');
   if (!leafletEl || !canvas) return;
 
   if (canUseLeaflet()) {
@@ -1743,12 +1755,14 @@ function showMapView() {
     if (controls) controls.style.display = 'none';
     if (caption) caption.classList.add('hidden');
     if (tavToggle) tavToggle.style.display = '';
+    if (bathToggle) bathToggle.style.display = '';
     initLeafletMap();
   } else {
     leafletEl.style.display = 'none';
     canvas.style.display = 'block';
     if (controls) controls.style.display = '';
     if (tavToggle) tavToggle.style.display = 'none';
+    if (bathToggle) bathToggle.style.display = 'none';
     setupMapCanvas();
     recenterMap();
   }
@@ -1822,6 +1836,15 @@ function initLeafletMap() {
     leaflet.tavernLayer.addLayer(m);
   });
 
+  // Restroom markers (hidden until toggled on)
+  leaflet.bathroomLayer = L.layerGroup();
+  BATHROOMS_DATA.forEach((b) => {
+    const m = L.marker([b.lat, b.lng], { icon: L.divIcon({ html: '<div class="map-bathroom-marker"><i class="fa-solid fa-restroom"></i></div>', className: '', iconSize: [24, 24], iconAnchor: [12, 12] }) });
+    const q = encodeURIComponent(`${b.name} ${b.address}`);
+    m.bindPopup(`<div class="map-popup"><strong>${escapeHtml(b.name)}</strong><br><span class="mp-cat">${escapeHtml(b.note || 'Public restroom')}</span><br><a href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">Directions</a></div>`);
+    leaflet.bathroomLayer.addLayer(m);
+  });
+
   map.fitBounds(leaflet.trail.getBounds().pad(0.12));
   updateLeafletUser();
   updateLeafletTrack();
@@ -1850,6 +1873,15 @@ function toggleTaverns() {
   if (leaflet.tavernsVisible) leaflet.tavernLayer.addTo(leaflet.map);
   else leaflet.map.removeLayer(leaflet.tavernLayer);
   if (btn) { btn.classList.toggle('active', leaflet.tavernsVisible); btn.setAttribute('aria-pressed', String(leaflet.tavernsVisible)); }
+}
+
+function toggleBathrooms() {
+  const btn = document.getElementById('toggle-bathrooms-btn');
+  if (!leaflet.map) return;
+  leaflet.bathroomsVisible = !leaflet.bathroomsVisible;
+  if (leaflet.bathroomsVisible) leaflet.bathroomLayer.addTo(leaflet.map);
+  else leaflet.map.removeLayer(leaflet.bathroomLayer);
+  if (btn) { btn.classList.toggle('active', leaflet.bathroomsVisible); btn.setAttribute('aria-pressed', String(leaflet.bathroomsVisible)); }
 }
 
 // --- MAP CANVAS RENDER ENGINE (offline fallback) ---
@@ -2395,6 +2427,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   // Map: taverns toggle + switch between street map / offline diagram on connectivity change
   const tavBtn = document.getElementById('toggle-taverns-btn');
   if (tavBtn) tavBtn.addEventListener('click', toggleTaverns);
+  const bathBtn = document.getElementById('toggle-bathrooms-btn');
+  if (bathBtn) bathBtn.addEventListener('click', toggleBathrooms);
   const onConnectivityChange = () => { if (state.currentTab === 'map-tab') showMapView(); };
   window.addEventListener('online', onConnectivityChange);
   window.addEventListener('offline', onConnectivityChange);
