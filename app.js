@@ -764,7 +764,7 @@ async function openDetailsDrawer(siteId) {
     <div class="detail-section-title">My Journal & Reflections</div>
     <div class="journal-entry-container">
       <textarea id="drawer-journal-textarea" class="journal-textarea" placeholder="Write down your thoughts, memories, or stories about this historic site..."></textarea>
-      <div class="autosave-indicator" id="autosave-indicator">All edits auto-saved locally</div>
+      <div class="autosave-indicator" id="autosave-indicator"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> Notes save automatically — no button needed</div>
     </div>
 
     <div class="detail-section-title">Site Photos</div>
@@ -802,13 +802,15 @@ async function openDetailsDrawer(siteId) {
   textarea.addEventListener('input', () => {
     const text = textarea.value;
     const indicator = document.getElementById('autosave-indicator');
-    indicator.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Saving draft...`;
+    indicator.classList.remove('saved');
+    indicator.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Saving…`;
     
     clearTimeout(saveTimeout);
     saveTimeout = setTimeout(async () => {
       try {
         await saveJournal(siteId, text);
-        indicator.innerHTML = `<i class="fa-solid fa-circle-check"></i> Draft saved locally`;
+        indicator.classList.add('saved');
+        indicator.innerHTML = `<i class="fa-solid fa-circle-check"></i> Saved to this device`;
         if (state.currentTab === 'journal-tab') renderJournalTimeline();
       } catch (err) {
         indicator.innerHTML = `<i class="fa-solid fa-circle-exclamation"></i> Error saving`;
@@ -1903,6 +1905,7 @@ function setupTabRouting() {
 
 function switchTab(tabId) {
   state.currentTab = tabId;
+  try { localStorage.setItem('freedom_tab', tabId); } catch (e) { /* private mode */ }
   
   // Update Navbar Active Style
   document.querySelectorAll('.nav-item').forEach(btn => {
@@ -2065,6 +2068,21 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   });
   
+  // Persist an in-flight journal draft the moment the app is backgrounded or the
+  // page is hidden (iOS often unloads a suspended PWA), bypassing the 800ms debounce.
+  const flushJournalDraft = () => {
+    const ta = document.getElementById('drawer-journal-textarea');
+    if (ta && state.activeDetailSiteId != null) saveJournal(state.activeDetailSiteId, ta.value);
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushJournalDraft();
+  });
+  window.addEventListener('pagehide', flushJournalDraft);
+
+  // Return to the tab you left when the app reloads after being backgrounded.
+  const savedTab = localStorage.getItem('freedom_tab');
+  if (savedTab && savedTab !== 'timeline-tab' && document.getElementById(savedTab)) switchTab(savedTab);
+
   // Register Service Worker for PWA
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js')
