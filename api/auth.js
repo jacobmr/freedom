@@ -35,12 +35,12 @@ function getBody(req) {
   return null;
 }
 
-function baseUrl(req) {
-  const host =
-    req.headers["x-forwarded-host"] || req.headers.host || "freedom-trail.org";
-  const proto = req.headers["x-forwarded-proto"] || "https";
-  return `${proto}://${host}`;
-}
+// Fixed, allowlisted origin for magic-link URLs. NEVER derive this from request
+// headers (Host / X-Forwarded-Host are attacker-controlled): a spoofed host would
+// email the victim a link that leaks their valid resume token to another site.
+const SITE_ORIGIN = (
+  process.env.SITE_ORIGIN || "https://www.freedom-trail.org"
+).replace(/\/+$/, "");
 
 async function sendResumeEmail(to, link) {
   const key = process.env.RESEND_API_KEY;
@@ -90,7 +90,7 @@ export default async function handler(req, res) {
           try {
             await sendResumeEmail(
               email,
-              `${baseUrl(req)}/?resume=${encodeURIComponent(mintResumeToken(shareId))}`,
+              `${SITE_ORIGIN}/?resume=${encodeURIComponent(mintResumeToken(shareId))}`,
             );
           } catch (e) {
             console.error("resume email failed", e);
@@ -121,13 +121,11 @@ export default async function handler(req, res) {
         sql: "UPDATE shares SET edit_token_hash = ? WHERE id = ?",
         args: [hashToken(newToken), shareId],
       });
-      return res
-        .status(200)
-        .json({
-          id: shareId,
-          editToken: newToken,
-          payload: JSON.parse(r.rows[0].payload),
-        });
+      return res.status(200).json({
+        id: shareId,
+        editToken: newToken,
+        payload: JSON.parse(r.rows[0].payload),
+      });
     }
 
     res.setHeader("Allow", "GET, POST");
