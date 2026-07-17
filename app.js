@@ -1626,9 +1626,11 @@ function initLeafletMap() {
     attribution: '&copy; OpenStreetMap &copy; CARTO',
   }).addTo(map);
 
-  // Trail line through the 16 stops
-  const latlngs = SITES_DATA.map((s) => [s.lat, s.lng]);
-  leaflet.trail = L.polyline(latlngs, { color: '#bd2f2f', weight: 4, opacity: 0.85, dashArray: '2 9', lineCap: 'round' }).addTo(map);
+  // Real Freedom Trail brick line (OSM); falls back to straight stop-to-stop if the data didn't load.
+  const trailGeom = (typeof TRAIL_SEGMENTS !== 'undefined' && TRAIL_SEGMENTS.length)
+    ? TRAIL_SEGMENTS
+    : SITES_DATA.map((s) => [s.lat, s.lng]);
+  leaflet.trail = L.polyline(trailGeom, { color: '#bd2f2f', weight: 4, opacity: 0.9, lineCap: 'round', lineJoin: 'round' }).addTo(map);
 
   // Stop markers
   leaflet.stopLayer = L.layerGroup().addTo(map);
@@ -1864,23 +1866,33 @@ function drawMap() {
     ctx.stroke();
   }
   
-  // 2. Draw The Brick Trail Path Connecting all 16 stops
-  ctx.beginPath();
-  SITES_DATA.forEach((site, index) => {
-    const pt = proj.project(site.lat, site.lng);
-    if (index === 0) {
-      ctx.moveTo(pt.x, pt.y);
-    } else {
-      ctx.lineTo(pt.x, pt.y);
-    }
-  });
+  // 2. Draw the real Freedom Trail brick line (OSM segments); fall back to straight
+  //    stop-to-stop lines if the trail data didn't load.
   ctx.strokeStyle = pathColor;
   ctx.lineWidth = 4;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.setLineDash([4, 6]); // Stylized dashed red brick line
-  ctx.stroke();
-  ctx.setLineDash([]); // Reset dash
+  if (typeof TRAIL_SEGMENTS !== 'undefined' && TRAIL_SEGMENTS.length) {
+    ctx.beginPath();
+    TRAIL_SEGMENTS.forEach((seg) => {
+      seg.forEach((p, i) => {
+        const pt = proj.project(p[0], p[1]);
+        if (i === 0) ctx.moveTo(pt.x, pt.y);
+        else ctx.lineTo(pt.x, pt.y);
+      });
+    });
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    SITES_DATA.forEach((site, index) => {
+      const pt = proj.project(site.lat, site.lng);
+      if (index === 0) ctx.moveTo(pt.x, pt.y);
+      else ctx.lineTo(pt.x, pt.y);
+    });
+    ctx.setLineDash([4, 6]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
   
   // 3. Draw site node circles & labels
   SITES_DATA.forEach(site => {

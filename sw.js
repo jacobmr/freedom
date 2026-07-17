@@ -1,5 +1,5 @@
 // Bump this version whenever the app shell changes so old caches are purged on activate.
-const CACHE_NAME = 'freedom-trail-cache-v5';
+const CACHE_NAME = 'freedom-trail-cache-v6';
 
 // Local app-shell assets precached on install.
 const PRECACHE_ASSETS = [
@@ -7,6 +7,7 @@ const PRECACHE_ASSETS = [
   './index.html',
   './style.css',
   './app.js',
+  './trail-path.js',
   './manifest.json',
   './favicon.svg',
   './icon-192.png',
