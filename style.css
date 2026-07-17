@@ -511,12 +511,14 @@ body.light-mode .banner-content {
   display: flex;
   flex-direction: column;
   height: calc(100vh - 210px); /* Fill space between header & navbar */
+  height: calc(100dvh - 210px); /* dvh excludes mobile browser chrome so the map isn't clipped; vh line is the fallback */
   position: relative;
 }
 
 @media (min-width: 541px) {
   .map-view-container {
     height: calc(92vh - 210px);
+    height: calc(92dvh - 210px);
   }
 }
 
