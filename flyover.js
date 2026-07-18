@@ -42,6 +42,7 @@
       : "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
   }
 
+  // Cumulative distance array + total, for constant-speed interpolation along the path.
   function measure(path) {
     const cum = [0];
     for (let i = 1; i < path.length; i++)
@@ -49,6 +50,7 @@
     return { cum, total: cum[cum.length - 1] || 1 };
   }
 
+  // Position [lat,lng] at distance d along the path, plus the index reached.
   function at(path, cum, d) {
     let i = 1;
     while (i < cum.length && cum[i] < d) i++;
@@ -61,6 +63,7 @@
     return { pt: [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f], idx: i };
   }
 
+  // Distance along the path of the point nearest each stop (its "milestone").
   function milestones(path, cum, stops) {
     return stops
       .map((s) => {
@@ -112,8 +115,7 @@
       <div class="flyover-reveal" id="fo-reveal"></div>
       <div class="flyover-poster" id="fo-poster">
         <button class="flyover-play" id="fo-play" type="button"><i class="fa-solid fa-play"></i></button>
-        <p>Play your Freedom Trail recap</p>
-        <p id="fo-tapdbg" style="font:12px monospace;opacity:0.85;margin-top:4px">v13 · poster:0 doc:0</p>
+        <p>Tap to play your Freedom Trail recap</p>
       </div>
       <div class="flyover-summary hidden" id="fo-summary"></div>`;
     document.body.appendChild(root);
@@ -121,10 +123,11 @@
     let map = null,
       raf = null,
       started = false,
-      detachDocRef = null;
+      detachDoc = () => {};
     const close = () => {
       if (raf) cancelAnimationFrame(raf);
-      if (detachDocRef) detachDocRef();
+      detachDoc();
+      document.removeEventListener("keydown", onKey);
       if (map) {
         try {
           map.remove();
@@ -135,30 +138,16 @@
     };
     root.querySelector("#fo-close").addEventListener("click", close);
 
-    // All the Leaflet setup happens here, on Play, wrapped so a map hiccup can
-    // never leave a dead "disabled"-looking button — it surfaces a real error.
     const start = () => {
       if (started) return;
       started = true;
+      detachDoc();
       root.querySelector("#fo-poster").classList.add("hidden");
       try {
         root.querySelector("#fo-prog").classList.remove("hidden");
         const revealEl = root.querySelector("#fo-reveal");
         const fill = root.querySelector("#fo-fill");
         const lbl = root.querySelector("#fo-lbl");
-
-        const mapEl = document.getElementById("fo-map");
-
-        // On-screen diagnostic so a blank map can be pinned down remotely.
-        const dbg = document.createElement("div");
-        dbg.style.cssText =
-          "position:absolute;top:56px;left:8px;z-index:30;background:rgba(0,0,0,0.78);color:#7CFC00;font:11px/1.45 monospace;padding:6px 8px;border-radius:6px;max-width:92%;white-space:pre-wrap;pointer-events:none";
-        root.appendChild(dbg);
-        let tOk = 0,
-          tErr = 0;
-        const dbgUpd = () => {
-          dbg.textContent = `flyover v13 | map ${mapEl ? mapEl.clientWidth + "x" + mapEl.clientHeight : "?"} | pts ${path.length} | tiles ok:${tOk} err:${tErr}`;
-        };
 
         map = L.map("fo-map", {
           zoomControl: false,
@@ -171,20 +160,11 @@
           touchZoom: false,
           tap: false,
         });
-        const tiles = L.tileLayer(tileUrl(), {
+        L.tileLayer(tileUrl(), {
           maxZoom: 19,
           subdomains: "abcd",
           attribution: "&copy; OSM &copy; CARTO",
-        });
-        tiles.on("tileload", () => {
-          tOk++;
-          dbgUpd();
-        });
-        tiles.on("tileerror", () => {
-          tErr++;
-          dbgUpd();
-        });
-        tiles.addTo(map);
+        }).addTo(map);
 
         const latlngs = path.map((p) => [p[0], p[1]]);
         L.polyline(latlngs, {
@@ -219,26 +199,25 @@
           }
         });
 
-        // Size the map to its container, THEN frame the route — retried across a
-        // few ticks in case the container isn't measured on the first pass.
+        // Size the map to its container, then frame the route — retried across a few
+        // ticks in case the container isn't measured on the first pass.
         const bounds = L.latLngBounds(latlngs).pad(0.15);
-        const draw = () => {
-          if (!map) return;
-          map.invalidateSize();
-          map.fitBounds(bounds);
-          dbgUpd();
+        const drawMap = () => {
+          if (map) {
+            map.invalidateSize();
+            map.fitBounds(bounds);
+          }
         };
-        map.setView(latlngs[0], 14); // initial view so tiles start loading immediately
-        map.whenReady(draw);
-        requestAnimationFrame(draw);
-        setTimeout(draw, 200);
-        setTimeout(draw, 700);
-        setTimeout(draw, 1500);
-        dbgUpd();
+        map.setView(latlngs[0], 14);
+        map.whenReady(drawMap);
+        requestAnimationFrame(drawMap);
+        setTimeout(drawMap, 200);
+        setTimeout(drawMap, 700);
+        setTimeout(drawMap, 1500);
 
         const { cum, total } = measure(path);
         const miles = milestones(path, cum, stops);
-        const dur = Math.min(42000, Math.max(16000, total * 9));
+        const dur = Math.min(42000, Math.max(16000, total * 9)); // glide length scaled, clamped
 
         const showReveal = (s) => {
           if (stopDots[s.id])
@@ -336,39 +315,30 @@
       }
     };
 
-    // Diagnostic + bulletproof start. Count taps that reach the POSTER vs the
-    // DOCUMENT (capture phase) so we can tell what is eating them — and start on
-    // ANY tap anywhere while the poster is up, even a document-level one, as a
-    // last resort in case something covers the overlay.
-    let pTaps = 0,
-      dTaps = 0;
-    const tapDbg = root.querySelector("#fo-tapdbg");
-    const showTaps = () => {
-      if (tapDbg) tapDbg.textContent = `v13 · poster:${pTaps} doc:${dTaps}`;
+    // Start the recap on a tap anywhere. Some devices don't deliver taps to the
+    // overlay's own elements, so a document-level capture listener is the reliable
+    // trigger; the poster listeners are a belt-and-suspenders backup. Escape closes.
+    const onTap = () => {
+      if (!started) start();
+    };
+    function onDocTap(e) {
+      if (e && e.target && e.target.closest && e.target.closest("#fo-close"))
+        return; // let the ✕ close
+      onTap();
+    }
+    function onKey(e) {
+      if (e.key === "Escape") close();
+    }
+    detachDoc = () => {
+      document.removeEventListener("pointerup", onDocTap, true);
+      document.removeEventListener("click", onDocTap, true);
     };
     const poster = root.querySelector("#fo-poster");
-    poster.addEventListener("pointerdown", () => {
-      pTaps++;
-      showTaps();
-    });
-    function detachDoc() {
-      document.removeEventListener("pointerdown", docTap, true);
-      document.removeEventListener("click", docTap, true);
-    }
-    const startOnce = () => {
-      detachDoc();
-      start();
-    };
-    function docTap() {
-      dTaps++;
-      showTaps();
-      if (!started) startOnce();
-    }
-    poster.addEventListener("click", startOnce);
-    poster.addEventListener("pointerup", startOnce);
-    document.addEventListener("pointerdown", docTap, true);
-    document.addEventListener("click", docTap, true);
-    detachDocRef = detachDoc; // let close() detach these if the user closes first
+    poster.addEventListener("click", onTap);
+    poster.addEventListener("pointerup", onTap);
+    document.addEventListener("pointerup", onDocTap, true);
+    document.addEventListener("click", onDocTap, true);
+    document.addEventListener("keydown", onKey);
   }
 
   window.Flyover = { play };
