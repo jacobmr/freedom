@@ -110,6 +110,7 @@
       <div class="flyover-poster" id="fo-poster">
         <button class="flyover-play" id="fo-play" type="button"><i class="fa-solid fa-play"></i></button>
         <p>Play your Freedom Trail recap</p>
+        <p id="fo-tapdbg" style="font:12px monospace;opacity:0.85;margin-top:4px">v12 · taps: 0</p>
       </div>
       <div class="flyover-summary hidden" id="fo-summary"></div>`;
     document.body.appendChild(root);
@@ -151,7 +152,7 @@
         let tOk = 0,
           tErr = 0;
         const dbgUpd = () => {
-          dbg.textContent = `flyover v11 | map ${mapEl ? mapEl.clientWidth + "x" + mapEl.clientHeight : "?"} | pts ${path.length} | tiles ok:${tOk} err:${tErr}`;
+          dbg.textContent = `flyover v12 | map ${mapEl ? mapEl.clientWidth + "x" + mapEl.clientHeight : "?"} | pts ${path.length} | tiles ok:${tOk} err:${tErr}`;
         };
 
         map = L.map("fo-map", {
@@ -330,7 +331,18 @@
       }
     };
 
-    root.querySelector("#fo-play").addEventListener("click", start);
+    // Robustness + diagnostic: start on a tap ANYWHERE on the poster (not just the
+    // small button), across click + pointerup, and count pointerdowns on screen so
+    // we can see whether taps are even reaching the overlay.
+    let tapN = 0;
+    const tapDbg = root.querySelector("#fo-tapdbg");
+    const poster = root.querySelector("#fo-poster");
+    poster.addEventListener("pointerdown", () => {
+      tapN++;
+      if (tapDbg) tapDbg.textContent = `v12 · taps: ${tapN}`;
+    });
+    poster.addEventListener("click", start);
+    poster.addEventListener("pointerup", start);
   }
 
   window.Flyover = { play };
