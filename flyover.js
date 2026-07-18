@@ -151,7 +151,7 @@
         let tOk = 0,
           tErr = 0;
         const dbgUpd = () => {
-          dbg.textContent = `map ${mapEl ? mapEl.clientWidth + "x" + mapEl.clientHeight : "?"} | pts ${path.length} | tiles ok:${tOk} err:${tErr}`;
+          dbg.textContent = `flyover v11 | map ${mapEl ? mapEl.clientWidth + "x" + mapEl.clientHeight : "?"} | pts ${path.length} | tiles ok:${tOk} err:${tErr}`;
         };
 
         map = L.map("fo-map", {
