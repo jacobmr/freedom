@@ -98,6 +98,9 @@
 
     const root = document.createElement("div");
     root.className = "flyover-overlay";
+    // Inline-force top layer + interactivity, independent of any app CSS/stacking.
+    root.style.cssText =
+      "position:fixed;inset:0;z-index:2147483000;pointer-events:auto";
     root.innerHTML = `
       <div class="flyover-map" id="fo-map"></div>
       <button class="flyover-close" id="fo-close" aria-label="Close flyover"><i class="fa-solid fa-xmark"></i></button>
@@ -110,16 +113,18 @@
       <div class="flyover-poster" id="fo-poster">
         <button class="flyover-play" id="fo-play" type="button"><i class="fa-solid fa-play"></i></button>
         <p>Play your Freedom Trail recap</p>
-        <p id="fo-tapdbg" style="font:12px monospace;opacity:0.85;margin-top:4px">v12 · taps: 0</p>
+        <p id="fo-tapdbg" style="font:12px monospace;opacity:0.85;margin-top:4px">v13 · poster:0 doc:0</p>
       </div>
       <div class="flyover-summary hidden" id="fo-summary"></div>`;
     document.body.appendChild(root);
 
     let map = null,
       raf = null,
-      started = false;
+      started = false,
+      detachDocRef = null;
     const close = () => {
       if (raf) cancelAnimationFrame(raf);
+      if (detachDocRef) detachDocRef();
       if (map) {
         try {
           map.remove();
@@ -152,7 +157,7 @@
         let tOk = 0,
           tErr = 0;
         const dbgUpd = () => {
-          dbg.textContent = `flyover v12 | map ${mapEl ? mapEl.clientWidth + "x" + mapEl.clientHeight : "?"} | pts ${path.length} | tiles ok:${tOk} err:${tErr}`;
+          dbg.textContent = `flyover v13 | map ${mapEl ? mapEl.clientWidth + "x" + mapEl.clientHeight : "?"} | pts ${path.length} | tiles ok:${tOk} err:${tErr}`;
         };
 
         map = L.map("fo-map", {
@@ -331,18 +336,39 @@
       }
     };
 
-    // Robustness + diagnostic: start on a tap ANYWHERE on the poster (not just the
-    // small button), across click + pointerup, and count pointerdowns on screen so
-    // we can see whether taps are even reaching the overlay.
-    let tapN = 0;
+    // Diagnostic + bulletproof start. Count taps that reach the POSTER vs the
+    // DOCUMENT (capture phase) so we can tell what is eating them — and start on
+    // ANY tap anywhere while the poster is up, even a document-level one, as a
+    // last resort in case something covers the overlay.
+    let pTaps = 0,
+      dTaps = 0;
     const tapDbg = root.querySelector("#fo-tapdbg");
+    const showTaps = () => {
+      if (tapDbg) tapDbg.textContent = `v13 · poster:${pTaps} doc:${dTaps}`;
+    };
     const poster = root.querySelector("#fo-poster");
     poster.addEventListener("pointerdown", () => {
-      tapN++;
-      if (tapDbg) tapDbg.textContent = `v12 · taps: ${tapN}`;
+      pTaps++;
+      showTaps();
     });
-    poster.addEventListener("click", start);
-    poster.addEventListener("pointerup", start);
+    function detachDoc() {
+      document.removeEventListener("pointerdown", docTap, true);
+      document.removeEventListener("click", docTap, true);
+    }
+    const startOnce = () => {
+      detachDoc();
+      start();
+    };
+    function docTap() {
+      dTaps++;
+      showTaps();
+      if (!started) startOnce();
+    }
+    poster.addEventListener("click", startOnce);
+    poster.addEventListener("pointerup", startOnce);
+    document.addEventListener("pointerdown", docTap, true);
+    document.addEventListener("click", docTap, true);
+    detachDocRef = detachDoc; // let close() detach these if the user closes first
   }
 
   window.Flyover = { play };
